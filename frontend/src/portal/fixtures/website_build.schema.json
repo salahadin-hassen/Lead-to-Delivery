@@ -1,0 +1,189 @@
+{
+  "$defs": {
+    "CommunicationPreferences": {
+      "additionalProperties": false,
+      "properties": {
+        "contact_email": {
+          "anyOf": [
+            {
+              "format": "email",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Contact email for project updates (if different)"
+        },
+        "preferred_channel": {
+          "enum": [
+            "email",
+            "phone",
+            "video_call",
+            "slack"
+          ],
+          "title": "Preferred channel",
+          "type": "string"
+        },
+        "update_frequency": {
+          "default": "weekly",
+          "enum": [
+            "weekly",
+            "biweekly",
+            "monthly"
+          ],
+          "title": "How often would you like progress updates?",
+          "type": "string"
+        }
+      },
+      "required": [
+        "preferred_channel"
+      ],
+      "title": "CommunicationPreferences",
+      "type": "object"
+    },
+    "WebsiteBuildDetails": {
+      "additionalProperties": false,
+      "properties": {
+        "cms_preference": {
+          "default": "no_preference",
+          "enum": [
+            "wordpress",
+            "webflow",
+            "shopify",
+            "no_preference",
+            "other"
+          ],
+          "title": "Preferred CMS",
+          "type": "string"
+        },
+        "estimated_page_count": {
+          "anyOf": [
+            {
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Roughly how many pages?"
+        },
+        "existing_website_url": {
+          "anyOf": [
+            {
+              "format": "uri",
+              "maxLength": 2083,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Current website (if any)"
+        },
+        "has_brand_assets": {
+          "title": "Do you have a logo and brand guidelines ready?",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "has_brand_assets"
+      ],
+      "title": "WebsiteBuildDetails",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "additional_notes": {
+      "anyOf": [
+        {
+          "maxLength": 2000,
+          "minLength": 1,
+          "pattern": "^[^\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Anything else we should know?"
+    },
+    "business_goals": {
+      "maxLength": 2000,
+      "minLength": 10,
+      "title": "What business goals should this project achieve?",
+      "type": "string"
+    },
+    "communication": {
+      "$ref": "#/$defs/CommunicationPreferences",
+      "title": "Communication preferences"
+    },
+    "desired_delivery_date": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Desired delivery date"
+    },
+    "project_description": {
+      "maxLength": 2000,
+      "minLength": 10,
+      "title": "Short description of the project",
+      "type": "string"
+    },
+    "project_name": {
+      "maxLength": 120,
+      "minLength": 3,
+      "title": "Project name",
+      "type": "string"
+    },
+    "scope_requirements": {
+      "maxLength": 4000,
+      "minLength": 10,
+      "title": "Requirements and scope",
+      "type": "string"
+    },
+    "service_details": {
+      "$ref": "#/$defs/WebsiteBuildDetails"
+    },
+    "target_audience": {
+      "anyOf": [
+        {
+          "maxLength": 1000,
+          "minLength": 1,
+          "pattern": "^[^\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Target audience"
+    }
+  },
+  "required": [
+    "project_name",
+    "project_description",
+    "business_goals",
+    "scope_requirements",
+    "communication",
+    "service_details"
+  ],
+  "title": "WebsiteBuildOnboarding",
+  "type": "object"
+}

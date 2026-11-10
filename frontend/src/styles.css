@@ -184,3 +184,56 @@ input[aria-invalid='true'] { border-color: var(--red); }
   .timeline li { grid-template-columns: 1fr; gap: 0; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* client portal */
+.portal { min-height: 100vh; }
+.portal-header { background: var(--surface); border-bottom: 1px solid var(--line); }
+.portal-header-inner, .portal-main { max-width: 960px; margin: 0 auto; padding-left: 1.25rem; padding-right: 1.25rem; }
+.portal-header-inner { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding-top: 0.85rem; padding-bottom: 0.85rem; }
+.portal-header .brand { padding: 0; }
+.portal-client { color: var(--ink-soft); font-size: 0.9rem; text-align: right; overflow-wrap: anywhere; }
+.portal-main { padding-top: 2rem; padding-bottom: 4rem; }
+.portal-intro { margin-bottom: 1.25rem; }
+.portal-intro h1 { margin-bottom: 0.4rem; }
+.eyebrow { font-size: 0.8rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--teal); margin-bottom: 0.35rem; }
+.portal-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin-bottom: 0.4rem; }
+.portal-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-m); padding: 1.5rem; margin-bottom: 1.25rem; }
+.portal-card h1 { margin-bottom: 0.6rem; }
+.portal-form { display: grid; gap: 1.25rem; }
+.portal-fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 1.1rem; }
+.portal-fieldset + .portal-fieldset { border-top: 1px solid var(--line); padding-top: 1.25rem; }
+.portal-fieldset legend { font-weight: 600; font-size: 1.05rem; padding: 0; margin-bottom: 0.9rem; }
+.portal-field { display: grid; gap: 0.3rem; }
+.portal-field > label { font-weight: 500; }
+.portal-field .req { color: var(--red); }
+.portal-field input, .portal-field select, .portal-field textarea { width: 100%; max-width: 560px; font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-s); padding: 0.5rem 0.6rem; }
+.portal-field textarea { max-width: 100%; resize: vertical; }
+.portal-field [aria-invalid='true'] { border-color: var(--red); }
+.portal-field .hint:empty { display: none; }
+.portal-field .hint, .portal-field .field-error { margin: 0; }
+.choice-row { display: flex; gap: 1.25rem; }
+.choice { display: flex; align-items: center; gap: 0.4rem; font-weight: 400; }
+.portal-form .button.primary { justify-self: start; padding: 0.65rem 1.25rem; font-size: 1rem; }
+.portal-percent { font-size: 1.05rem; margin-bottom: 0.5rem; }
+.portal-percent strong { font-size: 2rem; color: var(--teal); font-variant-numeric: tabular-nums; margin-right: 0.25rem; }
+.portal-progress .progress { margin-bottom: 1rem; }
+.portal-progress .progress-track { height: 10px; border-radius: 5px; }
+.portal-progress .facts { margin-bottom: 0; }
+.portal-columns { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 1.25rem; align-items: start; }
+.portal-milestones { list-style: none; margin: 0; padding: 0; display: grid; gap: 1.1rem; }
+.milestone-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; margin-bottom: 0.35rem; }
+.milestone-head h3 { margin: 0; }
+.portal-tasks { list-style: none; margin: 0; padding: 0; }
+.portal-tasks li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 0.6rem; align-items: center; padding: 0.4rem 0; border-bottom: 1px solid var(--muted-soft); }
+.portal-tasks li:last-child { border-bottom: 0; }
+.task-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--line); }
+.task-dot.in_progress { border-color: var(--amber); background: var(--amber-soft); }
+.task-dot.done { border-color: var(--teal); background: var(--teal); }
+.small { font-size: 0.85rem; }
+@media (max-width: 760px) {
+  .portal-columns { grid-template-columns: minmax(0, 1fr); }
+  .portal-card { padding: 1.1rem; }
+  .portal-main { padding-top: 1.25rem; }
+  .portal-tasks li { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .portal-tasks li > :last-child { grid-column: 2 / -1; }
+}

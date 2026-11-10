@@ -9,6 +9,7 @@ import { Integrations } from './pages/Integrations';
 import { Login } from './pages/Login';
 import { ProjectDetail } from './pages/ProjectDetail';
 import { Projects } from './pages/Projects';
+import { PortalApp } from './portal/PortalApp';
 import { Link, matchPath, navigate, useLocation } from './router';
 
 function Routes() {
@@ -35,5 +36,7 @@ function Gate() {
 }
 
 export function App() {
+  // The client portal is a separate experience: no admin session or admin API.
+  if (window.location.pathname === '/portal' || window.location.pathname.startsWith('/portal/')) return <PortalApp />;
   return <AuthProvider><Gate /></AuthProvider>;
 }

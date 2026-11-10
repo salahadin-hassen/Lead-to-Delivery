@@ -39,7 +39,7 @@ function withQuery(path: string, query?: Query): string {
   return text ? `${path}?${text}` : path;
 }
 
-async function toError(response: Response): Promise<ApiError> {
+export async function toError(response: Response): Promise<ApiError> {
   let body: unknown = null;
   try {
     body = await response.json();
