@@ -11,7 +11,7 @@ const NAV = [
 
 export function Layout({ children }: { children: ReactNode }) {
   const { path } = useLocation();
-  const { logout } = useAuth();
+  const { logout, logoutEverywhere, admin } = useAuth();
   return (
     <div className="shell">
       <a className="skip-link" href="#main">Skip to content</a>
@@ -31,9 +31,15 @@ export function Layout({ children }: { children: ReactNode }) {
             ))}
           </ul>
         </nav>
-        <button type="button" className="button ghost sign-out" onClick={() => { void logout(); }}>
-          Sign out
-        </button>
+        <div className="sidebar-account">
+          {admin && <p className="signed-in" title={admin.email}>{admin.display_name}<span>{admin.email}</span></p>}
+          <button type="button" className="button ghost sign-out" onClick={() => { void logout(); }}>
+            Sign out
+          </button>
+          <button type="button" className="link-button sign-out-all" onClick={() => { void logoutEverywhere(); }}>
+            Sign out on all devices
+          </button>
+        </div>
       </aside>
       <main id="main" className="content" tabIndex={-1}>{children}</main>
     </div>

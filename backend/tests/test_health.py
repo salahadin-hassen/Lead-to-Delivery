@@ -79,7 +79,7 @@ def test_production_app_refuses_to_start_without_security_settings(
     import app.main as main_module
     from app.config import Settings
 
-    for key in ("ADMIN_PASSWORD_HASH", "CRM_WEBHOOK_SECRET"):
+    for key in ("ADMIN_MFA_ENCRYPTION_KEY", "CRM_WEBHOOK_SECRET"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("APP_BASE_URL", "https://hub.example.com")

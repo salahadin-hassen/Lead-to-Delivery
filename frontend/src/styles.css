@@ -237,3 +237,14 @@ input[aria-invalid='true'] { border-color: var(--red); }
   .portal-tasks li { grid-template-columns: auto minmax(0, 1fr) auto; }
   .portal-tasks li > :last-child { grid-column: 2 / -1; }
 }
+
+/* signed-in administrator */
+.sidebar-account { margin-top: auto; display: grid; gap: 0.5rem; padding: 0 0.5rem; }
+.sidebar-account .sign-out { margin-top: 0; }
+.signed-in { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
+.signed-in span { display: block; font-weight: 400; font-size: 0.8rem; color: #b9c6cc; }
+.sign-out-all { color: #b9c6cc; font-size: 0.8rem; justify-self: start; }
+@media (max-width: 720px) {
+  .sidebar-account { margin: 0 0 0 auto; grid-auto-flow: column; align-items: center; }
+  .signed-in { display: none; }
+}

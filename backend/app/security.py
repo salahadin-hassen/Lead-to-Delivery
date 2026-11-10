@@ -7,9 +7,8 @@ Standard library only. Nothing here touches the database or the network.
   the SHA-256 hex digest is ever stored.
 * Comparisons of secrets use ``hmac.compare_digest``.
 
-Generate an admin password hash for ``ADMIN_PASSWORD_HASH`` with::
-
-    python -m app.security hash-password
+Administrator accounts and their password hashes are managed with
+``python -m app.admin_users`` (one account per person, with MFA).
 """
 
 import base64
@@ -143,20 +142,8 @@ def verify_webhook_signature(
 
 
 def _main(argv: list[str]) -> int:
-    if argv != ["hash-password"]:
-        print("usage: python -m app.security hash-password", file=sys.stderr)
-        return 2
-    import getpass
-
-    first = getpass.getpass("Admin password: ")
-    if len(first) < 12:
-        print("Refusing: use at least 12 characters.", file=sys.stderr)
-        return 1
-    if getpass.getpass("Repeat: ") != first:
-        print("Passwords do not match.", file=sys.stderr)
-        return 1
-    print(hash_password(first))
-    return 0
+    print("Administrator passwords are set per account: python -m app.admin_users --help", file=sys.stderr)
+    return 2
 
 
 if __name__ == "__main__":

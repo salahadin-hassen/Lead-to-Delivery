@@ -99,7 +99,7 @@ class AdminAuthError(AppError):
 
 
 class AdminNotConfiguredError(AppError):
-    """ADMIN_PASSWORD_HASH is not set: administrator login is impossible."""
+    """ADMIN_MFA_ENCRYPTION_KEY is not set (or cannot decrypt): administrator login is impossible."""
 
 
 class AdminLoginThrottledError(AppError):

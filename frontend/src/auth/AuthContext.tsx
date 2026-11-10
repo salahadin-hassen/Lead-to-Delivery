@@ -3,40 +3,55 @@ import { api, onUnauthorized } from '../api/client';
 
 type AuthState = 'checking' | 'authenticated' | 'anonymous';
 
+export interface AdminIdentity { email: string; display_name: string }
+
 interface AuthValue {
   state: AuthState;
-  login: (password: string) => Promise<void>;
+  admin: AdminIdentity | null;
+  login: (email: string, password: string, code: string) => Promise<void>;
   logout: () => Promise<void>;
+  logoutEverywhere: () => Promise<void>;
 }
+
+interface MeResponse { authenticated: boolean; admin?: AdminIdentity }
 
 const AuthContext = createContext<AuthValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>('checking');
+  const [admin, setAdmin] = useState<AdminIdentity | null>(null);
 
-  useEffect(() => {
-    let current = true;
-    api.get('/api/admin/me')
-      .then(() => { if (current) setState('authenticated'); })
-      .catch(() => { if (current) setState('anonymous'); });
-    const off = onUnauthorized(() => setState('anonymous'));
-    return () => { current = false; off(); };
-  }, []);
-
-  const login = useCallback(async (password: string) => {
-    await api.post('/api/admin/login', { password });
+  const refresh = useCallback(async () => {
+    const me = await api.get<MeResponse>('/api/admin/me');
+    setAdmin(me?.admin ?? null);
     setState('authenticated');
   }, []);
 
-  const logout = useCallback(async () => {
+  useEffect(() => {
+    let current = true;
+    refresh().catch(() => { if (current) setState('anonymous'); });
+    const off = onUnauthorized(() => { setAdmin(null); setState('anonymous'); });
+    return () => { current = false; off(); };
+  }, [refresh]);
+
+  const login = useCallback(async (email: string, password: string, code: string) => {
+    await api.post('/api/admin/login', { email, password, code });
+    await refresh();
+  }, [refresh]);
+
+  const end = useCallback(async (path: string) => {
     try {
-      await api.post('/api/admin/logout');
+      await api.post(path);
     } finally {
+      setAdmin(null);
       setState('anonymous');
     }
   }, []);
+  const logout = useCallback(() => end('/api/admin/logout'), [end]);
+  const logoutEverywhere = useCallback(() => end('/api/admin/logout-all'), [end]);
 
-  const value = useMemo(() => ({ state, login, logout }), [state, login, logout]);
+  const value = useMemo(() => ({ state, admin, login, logout, logoutEverywhere }),
+                        [state, admin, login, logout, logoutEverywhere]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

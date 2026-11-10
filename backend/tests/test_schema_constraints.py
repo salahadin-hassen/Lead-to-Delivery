@@ -298,7 +298,7 @@ def test_every_mutable_table_has_an_updated_at_trigger(db_conn) -> None:
         WHERE c.table_schema = 'public' AND c.column_name = 'updated_at'
         """
     ).fetchall()
-    assert len(rows) == 11
+    assert len(rows) == 12
     assert all(r["has_trigger"] for r in rows), rows
 
 

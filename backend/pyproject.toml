@@ -14,6 +14,8 @@ dependencies = [
     "psycopg-pool==3.3.3",
     "httpx==0.28.1",
     "google-auth==2.62.1",
+    # Already installed via google-auth; declared because app.mfa uses it directly.
+    "cryptography==50.0.2",
 ]
 
 [project.optional-dependencies]

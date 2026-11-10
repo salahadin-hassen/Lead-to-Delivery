@@ -7,36 +7,54 @@ beforeEach(() => window.history.replaceState(null, '', '/admin'));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('route protection and login', () => {
-  it('shows the sign-in form when there is no session, then the dashboard after login', async () => {
+  it('shows the sign-in form when there is no session, then the dashboard after login with MFA', async () => {
     let authed = false;
+    const admin = { email: 'admin@agency.example', display_name: 'Dana Admin' };
     const calls = mockFetch({
-      'GET /api/admin/me': () => (authed ? { body: { authenticated: true } } : { status: 401, body: { code: 'admin_auth_required' } }),
+      'GET /api/admin/me': () => (authed ? { body: { authenticated: true, admin } } : { status: 401, body: { code: 'admin_auth_required' } }),
       'POST /api/admin/login': (init) => {
-        authed = JSON.parse(String(init.body)).password === 'right';
-        return authed ? { body: { authenticated: true } } : { status: 401, body: { detail: 'Incorrect password.', code: 'invalid_credentials' } };
+        const body = JSON.parse(String(init.body));
+        authed = body.email === admin.email && body.password === 'right' && body.code === '123456';
+        return authed ? { body: { authenticated: true } }
+          : { status: 401, body: { detail: 'Incorrect email, password or code.', code: 'invalid_credentials' } };
       },
       'GET /api/admin/dashboard': () => (authed ? { body: dashboard } : { status: 401, body: {} }),
+      'POST /api/admin/logout-all': () => { authed = false; return { status: 204 }; },
     });
     render(<App />);
-    const password = await screen.findByLabelText('Administrator password');
+    const fill = (password: string, code: string) => {
+      fireEvent.change(screen.getByLabelText('Email'), { target: { value: admin.email } });
+      fireEvent.change(screen.getByLabelText('Password'), { target: { value: password } });
+      fireEvent.change(screen.getByLabelText('Authenticator code'), { target: { value: code } });
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    };
+    await screen.findByLabelText('Authenticator code');
     expect(screen.queryByText('Dashboard')).toBeNull();
 
-    fireEvent.change(password, { target: { value: 'wrong' } });
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
-    expect((await screen.findByRole('alert')).textContent).toBe('That password is not correct.');
-    expect((screen.getByLabelText('Administrator password') as HTMLInputElement).value).toBe('');
+    expect((await screen.findByRole('alert')).textContent).toContain('authenticator app');
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
 
-    fireEvent.change(screen.getByLabelText('Administrator password'), { target: { value: 'right' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    fill('right', '000000');
+    expect((await screen.findByRole('alert')).textContent).toBe('The email, password or code is not correct.');
+    expect((screen.getByLabelText('Password') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('Authenticator code') as HTMLInputElement).value).toBe('');
+
+    fill('right', '123456');
     expect(await screen.findByRole('heading', { name: 'Dashboard' })).toBeTruthy();
+    expect(screen.getByText('Dana Admin')).toBeTruthy();
     expect(calls.filter((c) => c.path === '/api/admin/dashboard').length).toBeGreaterThan(0);
     expect(localStorage.length + sessionStorage.length).toBe(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out on all devices' }));
+    expect(await screen.findByLabelText('Authenticator code')).toBeTruthy();
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/logout-all')).toBe(true);
   });
 
   it('returns to sign-in when an API call reports 401', async () => {
     mockFetch({ 'GET /api/admin/me': { body: { authenticated: true } }, 'GET /api/admin/dashboard': { status: 401, body: {} } });
     render(<App />);
-    expect(await screen.findByLabelText('Administrator password')).toBeTruthy();
+    expect(await screen.findByLabelText('Authenticator code')).toBeTruthy();
   });
 });
 

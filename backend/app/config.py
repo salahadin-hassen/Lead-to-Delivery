@@ -14,7 +14,8 @@ from urllib.parse import urlparse
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.security import MIN_WEBHOOK_SECRET_LENGTH, is_valid_password_hash
+from app.mfa import MfaKeyError, parse_key
+from app.security import MIN_WEBHOOK_SECRET_LENGTH
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -40,7 +41,9 @@ class Settings(BaseSettings):
     # Only read by the test suite; declared here so it is documented and typed.
     test_database_url: SecretStr | None = None
 
-    admin_password_hash: SecretStr | None = None
+    # Encrypts administrators' TOTP secrets at rest (32 random bytes, base64):
+    # `python -m app.mfa generate-key`. Accounts: `python -m app.admin_users`.
+    admin_mfa_encryption_key: SecretStr | None = None
     crm_webhook_secret: SecretStr | None = None
 
     clickup_api_token: SecretStr | None = None
@@ -91,17 +94,21 @@ class Settings(BaseSettings):
             raise ValueError("APP_BASE_URL must be an absolute http(s) URL")
         return value.rstrip("/")
 
-    @field_validator("admin_password_hash")
+    @field_validator("admin_mfa_encryption_key")
     @classmethod
-    def _password_hash_format(cls, value: SecretStr | None) -> SecretStr | None:
-        # Validated in every environment: a malformed hash would otherwise make
-        # every future login fail with no clear cause.
-        if value is not None and not is_valid_password_hash(value.get_secret_value()):
-            raise ValueError(
-                "ADMIN_PASSWORD_HASH is not a valid hash; generate one with "
-                "`python -m app.security hash-password`"
-            )
+    def _mfa_key_format(cls, value: SecretStr | None) -> SecretStr | None:
+        # Validated in every environment: a malformed key would otherwise make
+        # every administrator login fail with no clear cause.
+        if value is not None:
+            try:
+                parse_key(value.get_secret_value())
+            except MfaKeyError as exc:
+                raise ValueError(f"{exc}; generate one with `python -m app.mfa generate-key`") from None
         return value
+
+    def mfa_key(self) -> bytes:
+        """The decoded MFA encryption key, or MfaKeyError when not configured."""
+        return parse_key(self.admin_mfa_encryption_key.get_secret_value() if self.admin_mfa_encryption_key else None)
 
     @model_validator(mode="after")
     def _http_timeout_inside_lease(self) -> "Settings":
@@ -114,8 +121,8 @@ class Settings(BaseSettings):
         if not self.is_production:
             return self
         problems: list[str] = []
-        if self.admin_password_hash is None:
-            problems.append("ADMIN_PASSWORD_HASH is required")
+        if self.admin_mfa_encryption_key is None:
+            problems.append("ADMIN_MFA_ENCRYPTION_KEY is required")
         secret = self.crm_webhook_secret.get_secret_value() if self.crm_webhook_secret else ""
         if len(secret) < MIN_WEBHOOK_SECRET_LENGTH:
             problems.append(
