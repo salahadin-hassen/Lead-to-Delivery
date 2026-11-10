@@ -17,7 +17,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from app import db, migrations
+from app import db, migrations, web
 from app.config import Settings, get_settings
 from app.errors import (
     AdminAuthError,
@@ -54,6 +54,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             db.close_pool()
 
     app = FastAPI(title="Agency Lead-to-Delivery Automation Hub", lifespan=lifespan)
+    web.install(app)
     app.include_router(health_router, prefix="/api")
     app.include_router(webhooks_router, prefix="/api")
     app.include_router(portal_router, prefix="/api")

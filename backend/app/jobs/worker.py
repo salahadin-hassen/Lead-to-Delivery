@@ -16,12 +16,14 @@ import signal
 import socket
 import sys
 import threading
+import time
 import uuid
 
 from app import db
 from app.config import Settings, get_settings
 from app.jobs import handlers, runner
 from app.jobs.registry import HandlerRegistry
+from app.store import heartbeats
 
 logger = logging.getLogger("app.jobs.worker")
 
@@ -29,6 +31,18 @@ logger = logging.getLogger("app.jobs.worker")
 def default_worker_id() -> str:
     host = "".join(c if c.isalnum() or c in ".-" else "-" for c in socket.gethostname())[:40] or "host"
     return f"{host}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+
+
+HEARTBEAT_EVERY_SECONDS = 15
+
+
+def _heartbeat(worker_id: str, processed: int, *, final: bool = False) -> None:
+    """Record liveness; a failure is logged and never stops job processing."""
+    try:
+        with db.transaction() as conn:
+            (heartbeats.stopped if final else heartbeats.beat)(conn, worker_id, processed)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("worker heartbeat failed: %s", type(exc).__name__)
 
 
 def run(settings: Settings, registry: HandlerRegistry, stop: threading.Event, *, worker_id: str | None = None) -> int:
@@ -42,7 +56,17 @@ def run(settings: Settings, registry: HandlerRegistry, stop: threading.Event, *,
                     settings.worker_poll_seconds)
         if not len(registry):
             logger.warning("no job handlers registered: queued jobs stay pending until adapters exist")
+        _heartbeat(worker_id, 0)
+        try:
+            with db.transaction() as conn:
+                heartbeats.prune(conn)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("heartbeat pruning failed: %s", type(exc).__name__)
+        last_beat = time.monotonic()
         while not stop.is_set():
+            if time.monotonic() - last_beat >= HEARTBEAT_EVERY_SECONDS:
+                _heartbeat(worker_id, processed)
+                last_beat = time.monotonic()
             try:
                 report = runner.run_one(registry, worker_id=worker_id, lease_seconds=settings.worker_lease_seconds,
                                         max_retry_delay=settings.worker_max_retry_delay_seconds)
@@ -56,6 +80,7 @@ def run(settings: Settings, registry: HandlerRegistry, stop: threading.Event, *,
             else:
                 processed += 1
     finally:
+        _heartbeat(worker_id, processed, final=True)
         registry.close()
         db.close_pool()
         logger.info("worker stopped: id=%s processed=%d", worker_id, processed)

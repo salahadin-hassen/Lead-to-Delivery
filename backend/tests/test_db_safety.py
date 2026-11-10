@@ -21,6 +21,10 @@ from tests.db_safety import (
         "postgresql://localhost",  # no database name: libpq would default to the user name
         "dbname=ltd host=localhost",
         "postgresql:///ltd_test?dbname=ltd",  # query parameter overrides the path
+        "postgresql://u:pw@db.provider.example:5432/ltd_test",  # a remote ltd_test (staging, managed)
+        "postgresql://u:pw@10.0.0.5/ltd_test",
+        "postgresql:///ltd_test?host=db.provider.example",
+        "postgresql://localhost,db.provider.example/ltd_test",
     ],
 )
 def test_url_guard_rejects_non_test_databases(url: str) -> None:
@@ -28,7 +32,8 @@ def test_url_guard_rejects_non_test_databases(url: str) -> None:
         assert_test_database_url(url)
 
 
-@pytest.mark.parametrize("url", ["postgresql:///ltd_test", "dbname=ltd_test", "postgresql://u@h:5432/ltd_test"])
+@pytest.mark.parametrize("url", ["postgresql:///ltd_test", "dbname=ltd_test", "postgresql://u@localhost:5432/ltd_test",
+                                 "postgresql://u@127.0.0.1/ltd_test", "postgresql:///ltd_test?host=/var/run/postgresql"])
 def test_url_guard_accepts_ltd_test(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("APP_ENV", raising=False)
     assert_test_database_url(url)

@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     app_env: Literal["development", "test", "production"] = "development"
     app_base_url: str = "http://localhost:5173"
 
+    # Host names the API answers to (comma-separated). Unset: any host in
+    # development/test; in production, only the host of APP_BASE_URL.
+    allowed_hosts: str | None = None
+    # Built frontend (frontend/dist) to serve at /, /admin and /portal on the
+    # API's own origin. Unset: the API serves only /api.
+    frontend_dist_dir: Path | None = None
+
     database_url: SecretStr
     # Only read by the test suite; declared here so it is documented and typed.
     test_database_url: SecretStr | None = None
@@ -130,10 +137,23 @@ class Settings(BaseSettings):
             )
         if urlparse(self.app_base_url).scheme != "https":
             problems.append("APP_BASE_URL must use https")
+        if self.allowed_hosts and "*" in self.allowed_hosts:
+            problems.append("ALLOWED_HOSTS must list host names (no wildcard)")
+        if self.frontend_dist_dir is not None and not (self.frontend_dist_dir / "index.html").is_file():
+            problems.append("FRONTEND_DIST_DIR must contain index.html (run npm run build)")
         if problems:
             # Names only: never echo the values.
             raise ValueError("Insecure production configuration: " + "; ".join(problems))
         return self
+
+    def allowed_host_list(self) -> list[str] | None:
+        """Lower-cased allowed host names, or None for "any" (development/test only)."""
+        if self.allowed_hosts:
+            hosts = [h.strip().lower() for h in self.allowed_hosts.split(",") if h.strip()]
+            return None if hosts == ["*"] and not self.is_production else hosts
+        if self.is_production:
+            return [(urlparse(self.app_base_url).hostname or "").lower()]
+        return None
 
     def integration_status(self) -> dict[str, bool]:
         """Which integrations have credentials. Booleans only, never values."""

@@ -25,12 +25,12 @@ from tests.conftest import connect_to_schema
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 ALL_LABELS = ["0001_core_schema", "0002_events_and_integrations", "0003_seed_project_templates",
-              "0004_admin_login_attempts", "0005_admin_accounts_mfa"]
+              "0004_admin_login_attempts", "0005_admin_accounts_mfa", "0006_worker_heartbeats"]
 EXPECTED_TABLES = {
     "schema_migrations", "clients", "onboarding_invitations", "client_access_tokens",
     "onboarding_submissions", "projects", "project_templates", "milestones", "tasks",
     "webhook_events", "integration_jobs", "integration_attempts", "activity_events",
-    "admin_sessions", "admin_login_attempts", "admin_users", "admin_recovery_codes",
+    "admin_sessions", "admin_login_attempts", "admin_users", "admin_recovery_codes", "worker_heartbeats",
 }
 
 
@@ -66,10 +66,10 @@ def test_fresh_schema_applies_every_migration_in_order(migrated_database, scratc
         report = run_migrations(conn)
         assert report.applied == ALL_LABELS
         assert report.already_applied == []
-        assert report.latest_version == 5
+        assert report.latest_version == 6
         assert _recorded(conn) == [
             (1, "core_schema"), (2, "events_and_integrations"), (3, "seed_project_templates"),
-            (4, "admin_login_attempts"), (5, "admin_accounts_mfa"),
+            (4, "admin_login_attempts"), (5, "admin_accounts_mfa"), (6, "worker_heartbeats"),
         ]
         checksums = conn.execute("SELECT checksum FROM schema_migrations ORDER BY version").fetchall()
         assert [c[0] for c in checksums] == [m.checksum for m in discover()]
@@ -167,7 +167,7 @@ def test_concurrent_runners_apply_each_migration_exactly_once(migrated_database,
     applied = sorted(label for r in reports for label in r.applied)
     assert applied == ALL_LABELS
     with connect_to_schema(migrated_database, scratch_schema) as conn:
-        assert len(_recorded(conn)) == 5
+        assert len(_recorded(conn)) == 6
 
 
 def test_runner_requires_an_autocommit_connection(migrated_database, scratch_schema) -> None:
@@ -219,11 +219,11 @@ def test_cli_status_and_apply_on_migrated_database(migrated_database) -> None:
     status = _cli("--status", database_url=migrated_database)
     assert status.returncode == 0, status.stderr
     assert "database: ltd_test" in status.stdout
-    assert status.stdout.count("applied") == 5 and "PENDING" not in status.stdout
+    assert status.stdout.count("applied") == 6 and "PENDING" not in status.stdout
 
     apply = _cli(database_url=migrated_database)
     assert apply.returncode == 0, apply.stderr
-    assert "already applied" in apply.stdout and "schema at version 0005" in apply.stdout
+    assert "already applied" in apply.stdout and "schema at version 0006" in apply.stdout
 
 
 def test_cli_reports_connection_failure_without_secrets() -> None:

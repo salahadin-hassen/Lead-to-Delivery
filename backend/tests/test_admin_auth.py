@@ -52,7 +52,7 @@ def test_password_and_totp_create_a_session_for_that_admin(client, db_conn) -> N
 def test_cookie_is_secure_in_production(db_conn, migrated_database, pool_cleanup) -> None:
     with admin_app(migrated_database, app_env="production", app_base_url="https://hub.example.test",
                    crm_webhook_secret="s" * 40) as client:
-        cookie = login(client).headers["set-cookie"]
+        cookie = login(client, headers={**XHR, "Host": "hub.example.test"}).headers["set-cookie"]
     assert "Secure" in cookie
 
 
