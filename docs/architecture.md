@@ -158,7 +158,10 @@ backend/
                     connection-held guard, ping/applied_schema_version
     migrations.py   versioned SQL migration runner + CLI (python -m app.migrations)
     security.py     scrypt password hashing, 256-bit tokens, SHA-256 token hashes,
-                    constant-time compare; CLI to generate ADMIN_PASSWORD_HASH
+                    constant-time compare
+    mfa.py          TOTP (RFC 6238), recovery codes, AES-GCM encryption of TOTP secrets
+    admin_users.py  administrator account CLI (create/reset/disable; python -m app.admin_users)
+    web.py          security headers, host allowlist, body cap, built-frontend serving
     security.py     (also) webhook HMAC signing/verification
     errors.py       application error types (database, migrations, webhook intake)
     schemas/templates.py   Pydantic model for project_templates.definition
@@ -287,10 +290,10 @@ There is no template management API.
 All settings come from the environment or the gitignored repository-root
 `.env`; `.env.example` lists names with safe placeholders. Integration
 credentials are optional. In `APP_ENV=production` startup fails unless
-`ADMIN_PASSWORD_HASH` is valid, `CRM_WEBHOOK_SECRET` has at least 32 characters
-and `APP_BASE_URL` uses https. A malformed `ADMIN_PASSWORD_HASH` is rejected in
-every environment, and `verify_password` returns False when no hash is
-configured; there is no "auth disabled" mode.
+`ADMIN_MFA_ENCRYPTION_KEY` is set, `CRM_WEBHOOK_SECRET` has at least 32
+characters, `APP_BASE_URL` uses https, `ALLOWED_HOSTS` has no wildcard and a
+configured `FRONTEND_DIST_DIR` contains `index.html`. A malformed MFA key is
+rejected in every environment; there is no "auth disabled" mode.
 
 ### Health
 
@@ -559,10 +562,19 @@ default `host:pid:random`).
 
 ### Administrator (Task 6)
 
-**Authentication.** `POST /api/admin/login {password}` verifies against
-`ADMIN_PASSWORD_HASH` with `security.verify_password`. Missing hash → 503
-`admin_not_configured` (never open). Success creates a 256-bit session token;
-only its SHA-256 goes into `admin_sessions` (expires in 12 h). The raw token is
+**Authentication (production sprint, migration 0005).** Individual
+administrator accounts (`admin_users`) replace the original shared
+`ADMIN_PASSWORD_HASH`. `POST /api/admin/login {email, password, code}` needs
+the password AND a TOTP code (never accepted twice) or a single-use recovery
+code; all failures return the same 401 `invalid_credentials`. TOTP secrets are
+AES-256-GCM encrypted with `ADMIN_MFA_ENCRYPTION_KEY`; missing key → 503
+`admin_not_configured` (never open). Accounts are managed only on the server
+(`python -m app.admin_users`). Success creates a 256-bit session token bound
+to the administrator; only its SHA-256 goes into `admin_sessions` (expires in
+12 h, or after 60 minutes idle; ends at once if the account is disabled).
+`POST /api/admin/logout-all` revokes every session of that administrator.
+Throttling: 5 failures per source and per account name, 50 overall, per 15
+minutes. The raw token is
 returned only as cookie `ltd_admin_session`: HttpOnly, SameSite=Strict,
 Path=/api/admin, Max-Age 43200, Secure when `APP_ENV=production`. Every other
 `/api/admin/*` route depends on `require_admin` (hash lookup, not revoked, not
@@ -680,8 +692,9 @@ httpx 0.28.1; tests: pytest 9.1.1.
   HTTP 200 `ok` proves acceptance, not visibility; only `hooks.slack.com`
   `/services/…` URLs are accepted (Slack Workflow-builder webhooks and
   GovSlack hosts are refused).
-- Admin: one shared password, no accounts, roles or 2FA; sessions are not
-  rotated during their 12 h life; login throttling sees a reverse proxy as a
+- Admin: individual accounts with TOTP MFA, but no roles (every
+  administrator has full access) and no self-service account management
+  (server CLI only); sessions are not rotated during their 12 h life; login throttling sees a reverse proxy as a
   single source; expired pending invitations cannot be extended; the console
   is served by Vite in development/preview only (no production serving or
   deployment configuration); the dashboard's recent activity can be dominated
@@ -724,4 +737,5 @@ httpx 0.28.1; tests: pytest 9.1.1.
 
 - Live verification of the ClickUp adapter (needs credentials).
 - Live verification of the Slack adapter (needs a sandbox webhook) and the Google Sheets adapter (needs a service account and test spreadsheet).
-- Client portal UI; deployment. (The n8n demonstration workflow exists: [n8n-demo.md](n8n-demo.md).)
+- Production deployment (configuration and runbooks exist: [deployment.md](deployment.md); no hosting account was available).
+- (Done in the production sprint: client portal UI, admin MFA, hardening; see [production-readiness.md](production-readiness.md).)

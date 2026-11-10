@@ -4,19 +4,19 @@ When a deal is won in the CRM, this application starts client onboarding,
 creates the project and its tasks, and keeps ClickUp, Google Sheets and Slack
 up to date, with every integration failure recorded and safely retryable.
 
-> **Status: Tasks 1–9 of the build. Not production-ready.** What exists:
-> the signed CRM deal-won webhook, client onboarding portal API with
-> template-driven project generation, the durable integration worker, and
-> three outbound adapters (**ClickUp** task creation, **Slack** notifications,
-> **Google Sheets** project rows), plus an administrator console (React) with
-> authentication, client and project management, access-link regeneration
-> and integration monitoring. **None of the three adapters has been tested
-> against its real API yet** (all await credentials; they are tested against
-> fake APIs). A local **n8n demonstration workflow** signs synthetic CRM
-> deal-won events and replays them against the webhook through a local relay
-> that keeps the client invitation link out of n8n
-> ([docs/n8n-demo.md](docs/n8n-demo.md)); it is not a live CRM integration.
-> The client portal UI and deployment are not implemented.
+> **Status (2026-11-10): local/staging release candidate. NOT deployed and
+> NOT production-ready** — see [docs/production-readiness.md](docs/production-readiness.md).
+> What exists: the signed CRM deal-won webhook; the **client portal**
+> (invitation link, onboarding form, project dashboard); template-driven
+> project generation; the durable integration worker; three outbound adapters
+> (**ClickUp**, **Slack**, **Google Sheets**); and the administrator console
+> with **individual accounts and mandatory TOTP MFA**. **None of the three
+> adapters has been verified against its real API** (tested against fake APIs
+> only; see [docs/integration-verification.md](docs/integration-verification.md)).
+> Single-agency deployment: one application and database per agency; not a
+> multi-tenant SaaS. A local **n8n demonstration workflow** signs synthetic
+> CRM events through a local relay ([docs/n8n-demo.md](docs/n8n-demo.md)); it
+> is not a native GoHighLevel or HubSpot integration.
 > See [docs/requirements.md](docs/requirements.md),
 > [docs/architecture.md](docs/architecture.md) and
 > [docs/integrations.md](docs/integrations.md).
@@ -71,7 +71,8 @@ curl -i http://localhost:8010/api/health
 |---|---|
 | `.venv/bin/python -m app.migrations` | Apply pending migrations (advisory-locked, transactional) |
 | `.venv/bin/python -m app.migrations --status` | Show applied/pending migrations; exit 1 if any are pending |
-| `.venv/bin/python -m app.security hash-password` | Generate `ADMIN_PASSWORD_HASH` |
+| `.venv/bin/python -m app.mfa generate-key` | Generate `ADMIN_MFA_ENCRYPTION_KEY` |
+| `.venv/bin/python -m app.admin_users create --email … --name "…"` | Create an administrator (password + authenticator + recovery codes); see `--help` for reset/disable |
 | `.venv/bin/uvicorn app.main:app --port 8010` | Run the API |
 | `.venv/bin/python -m app.jobs.worker` | Run the integration worker (separate process; Ctrl-C / SIGTERM stops it cleanly) |
 | `CLICKUP_LIVE_TEST=1 .venv/bin/python -m app.integrations.clickup_live_check` | One controlled write to a dedicated ClickUp test List (needs credentials; uses `ltd_test`) |
@@ -82,7 +83,8 @@ curl -i http://localhost:8010/api/health
 ### 3. Administrator console
 
 ```bash
-cd backend && .venv/bin/python -m app.security hash-password   # put the output in .env as ADMIN_PASSWORD_HASH
+cd backend && .venv/bin/python -m app.mfa generate-key           # put the output in .env as ADMIN_MFA_ENCRYPTION_KEY
+cd backend && .venv/bin/python -m app.admin_users create --email you@agency.example --name "Your Name"
 cd backend && .venv/bin/uvicorn app.main:app --port 8010         # API (Vite proxies /api here)
 cd frontend && npm install && npm run dev                        # http://127.0.0.1:5173/admin
 ```
@@ -98,13 +100,18 @@ cd frontend && npm install && npm run dev                        # http://127.0.
 `http://localhost:5173`; use `http://127.0.0.1:5173` if you open that), because
 state-changing admin requests are rejected when their `Origin` differs.
 
-### Production notes (not a deployment guide)
+The client portal is at `/portal#t=<token>` (the link the webhook returns or
+the admin regenerates).
 
-`APP_ENV=production` requires `ADMIN_PASSWORD_HASH`, a 32+ character
-`CRM_WEBHOOK_SECRET` and an `https` `APP_BASE_URL`, and marks the admin cookie
-`Secure`. Serve the built console and the API from the same origin (a reverse
-proxy routing `/api` to uvicorn); no CORS is configured. Login throttling keys
-on the TCP peer address, so behind a proxy all clients share one bucket.
+### Production
+
+See [docs/deployment.md](docs/deployment.md),
+[docs/security.md](docs/security.md) and
+[docs/operations-runbook.md](docs/operations-runbook.md).
+`APP_ENV=production` refuses to start without `ADMIN_MFA_ENCRYPTION_KEY`, a
+32+ character `CRM_WEBHOOK_SECRET` and an `https` `APP_BASE_URL`. The API
+serves the built frontend itself (`FRONTEND_DIST_DIR`), so the app and API
+share one origin and no CORS is configured.
 
 ## Tests
 

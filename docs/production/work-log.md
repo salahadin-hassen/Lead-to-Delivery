@@ -56,3 +56,21 @@ before the instance is used again.
 - No non-empty `.env` value appears in any committed file.
 - `.gitignore` extended with logs, SQLite/database files, dumps and test
   report folders.
+- First commit `29c9e18` pushed over SSH to the empty remote (`main`).
+- Baseline re-run before changes: backend 732 passed, frontend 12 passed,
+  type check and build passed.
+
+## Phases 3–8 (summary; details in commit messages)
+
+- Task 9.1 fail-closed relay: confirmed present (fixed endpoint + endpoint
+  check node, covered by the suite).
+- Client portal (`66ebca5`, `f786572`), admin accounts + MFA (`12de804`),
+  hardening + worker heartbeat (`4fb7cab`), audit attribution, deployment
+  files and docs (final commit).
+- Staging: `CREATE DATABASE` was not permitted for the local role, so QA ran
+  on a private PostgreSQL 16 instance (initdb in a temporary directory, Unix
+  socket only, roles `ltd_owner`/`ltd_app`). Nothing touched `ltd`.
+- Google Sheets live check refused to run (test spreadsheet ID equals the
+  reporting one); a read-only access check returned `SHEETS_NOT_FOUND`.
+- One intermittent frontend test failure was traced to a race in the test
+  (dashboard heading rendered before its request), fixed, then 15 clean runs.

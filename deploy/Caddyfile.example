@@ -1,0 +1,12 @@
+# Reverse proxy with automatic HTTPS (Let's Encrypt). Replace the host name
+# with the confirmed domain; DNS must point at this server first.
+hub.agency.example {
+	encode gzip
+	reverse_proxy 127.0.0.1:8010
+	# Access log: request lines only. No application URL carries a secret:
+	# the portal token is in the URL fragment (never sent by browsers) and in
+	# the Authorization header (not logged by Caddy by default).
+	log {
+		output file /var/log/caddy/ltd-access.log
+	}
+}

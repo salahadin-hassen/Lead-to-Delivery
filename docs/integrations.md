@@ -558,9 +558,13 @@ one), runs on `ltd_test`, refuses while other Sheets jobs are pending, then:
 append → find once → re-sync updates the same row → change the project →
 row reflects it → exactly one row → delete the synthetic row after
 re-locating it → confirm it is gone. If cleanup cannot be verified it prints
-the project ID and worksheet for manual removal. **Status: not run; blocked
-by missing Google credentials.** Its steps were exercised against the fake
-API only.
+the project ID and worksheet for manual removal. **Status (2026-11-10):
+not run.** A service-account key is configured, but the test spreadsheet ID
+equals the reporting spreadsheet ID (the check correctly refuses), and a
+read-only access check returned `SHEETS_NOT_FOUND` (the spreadsheet is not
+shared with the service account, or the ID is wrong). Its steps were
+exercised against the fake API only. See
+[integration-verification.md](integration-verification.md).
 
 ### Adapter contract (for future adapters)
 

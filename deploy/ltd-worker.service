@@ -1,0 +1,27 @@
+# /etc/systemd/system/ltd-worker.service  (separate process from the API)
+[Unit]
+Description=Lead-to-Delivery integration worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ltd
+Group=ltd
+WorkingDirectory=/srv/lead-to-delivery/backend
+EnvironmentFile=/etc/lead-to-delivery/env
+Environment=LTD_DISABLE_DOTENV=1 PYTHONUNBUFFERED=1
+ExecStart=/srv/lead-to-delivery/backend/.venv/bin/python -m app.jobs.worker
+# SIGTERM: the worker finishes its current job, then exits.
+KillSignal=SIGTERM
+TimeoutStopSec=150
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# The Google service-account key must be readable by the ltd user, e.g.
+# /etc/lead-to-delivery/sheets-sa.json (root:ltd, mode 640).
+
+[Install]
+WantedBy=multi-user.target

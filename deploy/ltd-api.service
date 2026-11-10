@@ -1,0 +1,28 @@
+# /etc/systemd/system/ltd-api.service  (single-VM deployment)
+# Secrets come from /etc/lead-to-delivery/env (root:ltd, mode 640), never this file.
+[Unit]
+Description=Lead-to-Delivery API (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ltd
+Group=ltd
+WorkingDirectory=/srv/lead-to-delivery/backend
+EnvironmentFile=/etc/lead-to-delivery/env
+Environment=LTD_DISABLE_DOTENV=1
+# Listen on loopback only; the reverse proxy (Caddyfile.example) terminates
+# HTTPS. --forwarded-allow-ips trusts X-Forwarded-For ONLY from that proxy, so
+# login throttling sees real client addresses and nobody else can spoof them.
+ExecStart=/srv/lead-to-delivery/backend/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 --port 8010 --workers 2 \
+    --proxy-headers --forwarded-allow-ips 127.0.0.1 --no-server-header
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
