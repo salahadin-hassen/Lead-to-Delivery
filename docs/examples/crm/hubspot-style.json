@@ -1,0 +1,20 @@
+{
+  "event_id": "hs-deal-18842211907-closedwon-1730994000",
+  "event_type": "deal.won",
+  "occurred_at": "2026-11-07T16:20:00Z",
+  "source": "hubspot",
+  "deal": {
+    "external_id": "18842211907",
+    "name": "Marketing Automation Rollout",
+    "value": 4800.00,
+    "currency": "EUR",
+    "service_type": "marketing_automation_setup"
+  },
+  "contact": {
+    "external_id": "95510231",
+    "name": "Sam Okafor",
+    "email": "sam.okafor@northwind.example",
+    "company": "Northwind Analytics",
+    "phone": null
+  }
+}

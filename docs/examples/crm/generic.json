@@ -1,0 +1,20 @@
+{
+  "event_id": "evt_2026_0001",
+  "event_type": "deal.won",
+  "occurred_at": "2026-11-07T18:00:00Z",
+  "source": "generic",
+  "deal": {
+    "external_id": "deal_123",
+    "name": "Website Development Project",
+    "value": 2500,
+    "currency": "USD",
+    "service_type": "website_build"
+  },
+  "contact": {
+    "external_id": "contact_456",
+    "name": "Demo Client",
+    "email": "client@example.com",
+    "company": "Example Company",
+    "phone": "+10000000000"
+  }
+}

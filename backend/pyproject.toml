@@ -1,0 +1,34 @@
+[project]
+name = "lead-to-delivery-backend"
+version = "0.1.0"
+description = "Agency Lead-to-Delivery Automation Hub: FastAPI backend and integration worker."
+requires-python = ">=3.12"
+# Pinned to the versions already proven together on this machine
+# (see docs/architecture.md, "Dependencies").
+dependencies = [
+    "fastapi==0.142.2",
+    "uvicorn==0.54.0",
+    "pydantic[email]==2.13.5",
+    "pydantic-settings==2.15.0",
+    "psycopg[binary]==3.3.6",
+    "psycopg-pool==3.3.3",
+    "httpx==0.28.1",
+    "google-auth==2.62.1",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest==9.1.1",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"

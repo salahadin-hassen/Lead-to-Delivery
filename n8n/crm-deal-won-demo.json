@@ -1,0 +1,567 @@
+{
+  "id": "ltdCrmDealWonDemo",
+  "name": "LTD - CRM deal-won demo (HMAC + idempotent replay)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 1. Pick a CRM example\nIn **Select CRM Example** set `crm_format` to `generic`, `gohighlevel` or `hubspot`.\nAll three are synthetic payloads in the **style** of those CRMs (docs/examples/crm). No CRM account is connected; this is not a native GoHighLevel or HubSpot integration.",
+        "width": 520,
+        "height": 220
+      },
+      "id": "note-Note Formats",
+      "name": "Note Formats",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2. Normalize, then serialize once\n**Normalize CRM Payload** maps the example field by field onto the backend's generic `deal.won` contract and stops with a clear error if anything is invalid. **Build Exact Raw Body** turns it into ONE JSON string; that exact string is signed and sent.",
+        "width": 520,
+        "height": 220
+      },
+      "id": "note-Note Normalize",
+      "name": "Note Normalize",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        720,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3. Sign and send\nSignature = HMAC-SHA256(credential secret, `timestamp + \".\" + body`), hex, sent as `X-LTD-Signature: sha256=…` with `X-LTD-Timestamp`. The secret lives only in the **Crypto credential** and must equal the backend's `CRM_WEBHOOK_SECRET`.\n\nRequests go only to the **local relay** `http://127.0.0.1:8011`, fixed in both HTTP nodes and checked by **Check Relay Endpoint** before anything is sent. It forwards the exact bytes and headers to the API and returns only IDs and status: the API's onboarding link (bearer token) never reaches n8n.",
+        "width": 560,
+        "height": 220
+      },
+      "id": "note-Note HMAC",
+      "name": "Note HMAC",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1280,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 4. Replay the same event\nSame body and event ID, fresh timestamp and signature. The backend must answer **200 duplicate** and create nothing new. Only IDs and status ever reach n8n (the relay strips the onboarding link), and this instance keeps no execution data.",
+        "width": 600,
+        "height": 220,
+        "color": 4
+      },
+      "id": "note-Note Replay",
+      "name": "Note Replay",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1900,
+        -260
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "node-manual-trigger",
+      "name": "Run Demo",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a-format",
+              "name": "crm_format",
+              "value": "generic",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-select-crm-example",
+      "name": "Select CRM Example",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Runs before any HTTP request. Both HTTP nodes may only call the local sanitizing\n// relay (backend/app/demo_relay.py): the API's own 201 response carries a client\n// bearer-token link, and n8n shows every node's output in the editor. This reads\n// the HTTP nodes' own settings and stops the run, before anything is sent, if\n// either one was changed to point anywhere else.\nconst RELAY_ENDPOINT = 'http://127.0.0.1:8011/api/webhooks/crm/deal-won';\nconst problems = [];\nfor (const name of ['Send Deal-Won Event', 'Replay Deal-Won Event']) {\n  let p;\n  try { p = $(name).params; } catch (e) { p = undefined; }\n  if (!p || typeof p !== 'object') { problems.push(`${name}: node not found`); continue; }\n  if (p.url !== RELAY_ENDPOINT) problems.push(`${name}: URL must be exactly ${RELAY_ENDPOINT}`);\n  if (String(p.method) !== 'POST') problems.push(`${name}: method must be POST`);\n  if (p.sendQuery) problems.push(`${name}: query parameters are not allowed`);\n  const o = p.options && typeof p.options === 'object' ? p.options : {};\n  if (o.proxy) problems.push(`${name}: a proxy is not allowed`);\n  if (o.redirect?.redirect?.followRedirects !== false) problems.push(`${name}: redirects must not be followed`);\n}\nif (problems.length) {\n  throw new Error(`Relay endpoint check failed: ${problems.join('; ')}. No request was sent.`);\n}\nreturn $input.all();\n"
+      },
+      "id": "node-check-relay-endpoint",
+      "name": "Check Relay Endpoint",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "action": "generate",
+        "dataPropertyName": "demo_id",
+        "encodingType": "uuid"
+      },
+      "id": "node-generate-demo-id",
+      "name": "Generate Demo ID",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        600,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalization boundary: a CRM-style example -> the backend's generic deal.won contract\n// (backend/app/schemas/crm.py). The examples are copied verbatim from\n// docs/examples/crm/*.json and contain synthetic data only. GoHighLevel and HubSpot\n// here are payload STYLES, not live integrations.\nconst EXAMPLES = {\n  \"generic\": {\n    \"event_id\": \"evt_2026_0001\",\n    \"event_type\": \"deal.won\",\n    \"occurred_at\": \"2026-11-07T18:00:00Z\",\n    \"source\": \"generic\",\n    \"deal\": {\n      \"external_id\": \"deal_123\",\n      \"name\": \"Website Development Project\",\n      \"value\": 2500,\n      \"currency\": \"USD\",\n      \"service_type\": \"website_build\"\n    },\n    \"contact\": {\n      \"external_id\": \"contact_456\",\n      \"name\": \"Demo Client\",\n      \"email\": \"client@example.com\",\n      \"company\": \"Example Company\",\n      \"phone\": \"+10000000000\"\n    }\n  },\n  \"gohighlevel\": {\n    \"event_id\": \"ghl_opp_status_8f2c1e4a-won\",\n    \"event_type\": \"deal.won\",\n    \"occurred_at\": \"2026-11-07T15:42:10+00:00\",\n    \"source\": \"gohighlevel\",\n    \"deal\": {\n      \"external_id\": \"opp_7Hk2Lq9Zt4\",\n      \"name\": \"Local SEO - Monthly Retainer\",\n      \"value\": 1200,\n      \"currency\": \"USD\",\n      \"service_type\": \"seo_retainer\"\n    },\n    \"contact\": {\n      \"external_id\": \"cnt_Xa81PqR2mN\",\n      \"name\": \"Jordan Rivera\",\n      \"email\": \"jordan@riverabakery.example\",\n      \"company\": \"Rivera Bakery\",\n      \"phone\": \"+15555550123\"\n    }\n  },\n  \"hubspot\": {\n    \"event_id\": \"hs-deal-18842211907-closedwon-1730994000\",\n    \"event_type\": \"deal.won\",\n    \"occurred_at\": \"2026-11-07T16:20:00Z\",\n    \"source\": \"hubspot\",\n    \"deal\": {\n      \"external_id\": \"18842211907\",\n      \"name\": \"Marketing Automation Rollout\",\n      \"value\": 4800.0,\n      \"currency\": \"EUR\",\n      \"service_type\": \"marketing_automation_setup\"\n    },\n    \"contact\": {\n      \"external_id\": \"95510231\",\n      \"name\": \"Sam Okafor\",\n      \"email\": \"sam.okafor@northwind.example\",\n      \"company\": \"Northwind Analytics\",\n      \"phone\": null\n    }\n  }\n};\n\n// One explicit mapping per format: which source label it must carry and the prefix\n// used for the per-execution demo IDs.\nconst FORMATS = {\n  generic:     { source: 'generic',     prefix: 'gen' },\n  gohighlevel: { source: 'gohighlevel', prefix: 'ghl' },\n  hubspot:     { source: 'hubspot',     prefix: 'hs'  },\n};\nconst SERVICE_TYPES = ['website_build', 'seo_retainer', 'marketing_automation_setup'];\n\nconst settings = $('Select CRM Example').first().json;\nconst demoId = $('Generate Demo ID').first().json.demo_id;\nconst format = String(settings.crm_format ?? '').trim().toLowerCase();\nif (!FORMATS[format]) {\n  throw new Error(`Normalization failed: crm_format must be generic, gohighlevel or hubspot (got \"${format}\")`);\n}\nif (typeof demoId !== 'string' || !/^[0-9a-f-]{36}$/.test(demoId)) {\n  throw new Error('Normalization failed: no demo ID was generated');\n}\n\nconst src = EXAMPLES[format];\nconst { source, prefix } = FORMATS[format];\nconst fail = (field, why) => { throw new Error(`Normalization failed: ${field} ${why}`); };\nconst text = (value, field, { required = true, max = 300 } = {}) => {\n  if (value === undefined || value === null || (typeof value === 'string' && value.trim() === '')) {\n    if (required) fail(field, 'is required');\n    return null;\n  }\n  if (typeof value !== 'string') fail(field, 'must be text');\n  const v = value.trim();\n  if (v.length > max) fail(field, `must be at most ${max} characters`);\n  return v;\n};\n\nif (src.source !== source) fail('source', `must be \"${source}\" for the ${format} example`);\nif (src.event_type !== 'deal.won') fail('event_type', 'must be deal.won');\n\nconst value = src.deal.value;\nif (value !== null && value !== undefined) {\n  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) fail('deal.value', 'must be a non-negative number');\n  if (Math.round(value * 100) !== value * 100) fail('deal.value', 'must have at most 2 decimals');\n}\nconst currency = value === null || value === undefined ? null : text(src.deal.currency, 'deal.currency', { max: 3 }).toUpperCase();\nif (currency !== null && !/^[A-Z]{3}$/.test(currency)) fail('deal.currency', 'must be a 3-letter code');\nconst serviceType = text(src.deal.service_type, 'deal.service_type', { max: 64 });\nif (!SERVICE_TYPES.includes(serviceType)) fail('deal.service_type', `must be one of ${SERVICE_TYPES.join(', ')}`);\n\nconst email = text(src.contact.email, 'contact.email', { required: false, max: 254 });\nconst contactId = text(src.contact.external_id, 'contact.external_id', { required: false, max: 200 });\nif (email !== null && !/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email)) fail('contact.email', 'is not an email address');\nif (email === null && contactId === null) fail('contact', 'needs external_id or email');\nconst phone = text(src.contact.phone, 'contact.phone', { required: false, max: 40 });\nif (phone !== null && !/^[0-9+()\\-. ]{3,40}$/.test(phone)) fail('contact.phone', 'has unsupported characters');\n\n// Field-by-field construction: nothing from the example is passed through unchecked.\n// Event and deal IDs are unique per execution, so a run never replays an old event.\nconst normalized = {\n  event_id: `n8n-demo-${prefix}-${demoId}`,\n  event_type: 'deal.won',\n  occurred_at: new Date().toISOString(),\n  source,\n  deal: {\n    external_id: `${text(src.deal.external_id, 'deal.external_id', { max: 120 })}-${demoId}`,\n    name: text(src.deal.name, 'deal.name', { required: false }),\n    value: value ?? null,\n    currency,\n    service_type: serviceType,\n  },\n  contact: {\n    external_id: contactId,\n    name: text(src.contact.name, 'contact.name', { max: 200 }),\n    email: email === null ? null : email.toLowerCase(),\n    company: text(src.contact.company, 'contact.company', { required: false }),\n    phone,\n  },\n};\nreturn [{ json: { crm_format: format, normalized } }];\n"
+      },
+      "id": "node-normalize-crm-payload",
+      "name": "Normalize CRM Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Serialize ONCE. This exact string is what gets signed and what gets sent, for both\n// the first request and the replay. Nothing downstream parses or re-serializes it.\nconst { normalized, crm_format } = $input.first().json;\nconst body = JSON.stringify(normalized);\nreturn [{ json: {\n  body,\n  event_id: normalized.event_id,\n  deal_id: normalized.deal.external_id,\n  crm_format,\n} }];\n"
+      },
+      "id": "node-build-exact-raw-body",
+      "name": "Build Exact Raw Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Unix seconds, as required by X-LTD-Timestamp.\nreturn [{ json: { ...$input.first().json, timestamp: String(Math.floor(Date.now() / 1000)) } }];\n"
+      },
+      "id": "node-create-webhook-timestamp",
+      "name": "Create Webhook Timestamp",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "action": "hmac",
+        "type": "SHA256",
+        "value": "={{ $json.timestamp + '.' + $json.body }}",
+        "dataPropertyName": "signature",
+        "encoding": "hex"
+      },
+      "id": "node-sign-webhook",
+      "name": "Sign Webhook",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        0
+      ],
+      "credentials": {
+        "crypto": {
+          "id": "ltdCrmHmacDemo01",
+          "name": "LTD CRM webhook HMAC (demo)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8011/api/webhooks/crm/deal-won",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-LTD-Timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "X-LTD-Signature",
+              "value": "=sha256={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 15000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
+      },
+      "id": "node-send-deal-won-event",
+      "name": "Send Deal-Won Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1600,
+        0
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// The relay already removed the onboarding link (it carries a client bearer token).\n// Keep only the IDs and the outcome.\n// The relay returns only these fields; anything else means the request did not go\n// through the sanitizing relay, so stop immediately and pass nothing on.\nconst RELAY_FIELDS = ['status', 'client_id', 'invitation_id', 'event_id', 'code', 'field', 'relay'];\nconst res = $input.first().json;\nconst status = res.statusCode;\nconst body = res.body && typeof res.body === 'object' && !Array.isArray(res.body) ? res.body : {};\nconst unexpected = Object.keys(body).filter((k) => !RELAY_FIELDS.includes(k));\nif (unexpected.length) {\n  throw new Error(`Unsafe response: ${unexpected.length} field(s) outside the relay allowlist. Did the request bypass the relay?`);\n}\n\nconst eventId = $('Build Exact Raw Body').first().json.event_id;\nif (status === 201 && body.status === 'created' && typeof body.client_id === 'string') {\n  return [{ json: {\n    event_id: eventId,\n    first_status: 201,\n    first_result: 'created',\n    client_id: body.client_id,\n    invitation_id: typeof body.invitation_id === 'string' ? body.invitation_id : null,\n  } }];\n}\nconst code = typeof body.code === 'string' ? body.code : null;\nconst field = typeof body.field === 'string' ? body.field : null;\nconst meaning = {\n  200: 'the event was already processed earlier (not a new event)',\n  401: 'signature rejected: the Crypto credential must equal the backend CRM_WEBHOOK_SECRET',\n  409: 'conflict (event ID reused with different data, or client identity conflict)',\n  413: 'payload too large',\n  415: 'wrong content type',\n  422: 'payload rejected by validation',\n  502: code === 'upstream_unreachable' ? 'the relay could not reach the API (is it running on its port?)'\n     : 'the relay received an unexpected response from the API',\n  503: 'backend not ready (is CRM_WEBHOOK_SECRET set?)',\n}[status] || 'unexpected response';\nthrow new Error(`First request failed: HTTP ${status}${code ? ` (${code})` : ''}${field ? ` at ${field}` : ''}: ${meaning}. Replay was not sent.`);\n"
+      },
+      "id": "node-validate-first-response",
+      "name": "Validate First Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1820,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// HTTP Request error output: the relay could not be reached (no HTTP response).\nconst url = 'http://127.0.0.1:8011';\nconst err = $input.first().json.error || {};\nconst reason = String(err.code || err.description || err.message || 'connection error').slice(0, 120);\nthrow new Error(`Relay not reachable at ${url}: ${reason}. Start the relay and the API (see docs/n8n-demo.md).`);\n"
+      },
+      "id": "node-relay-unreachable",
+      "name": "Relay Unreachable",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1820,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fresh timestamp for the replay, strictly later than the first one, so the replay\n// carries a new signature over the SAME body.\nconst first = Number($('Create Webhook Timestamp').first().json.timestamp);\nlet now = Math.floor(Date.now() / 1000);\nif (now <= first) {\n  const until = (first + 1) * 1000 + 20;\n  if (typeof setTimeout === 'function') {\n    await new Promise((resolve) => setTimeout(resolve, until - Date.now()));\n  }\n  while (Date.now() < until) { /* at most ~1 s */ }\n  now = Math.floor(Date.now() / 1000);\n}\nconst built = $('Build Exact Raw Body').first().json;\nreturn [{ json: {\n  body: built.body,\n  event_id: built.event_id,\n  timestamp: String(now),\n} }];\n"
+      },
+      "id": "node-create-replay-timestamp",
+      "name": "Create Replay Timestamp",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2020,
+        -20
+      ]
+    },
+    {
+      "parameters": {
+        "action": "hmac",
+        "type": "SHA256",
+        "value": "={{ $json.timestamp + '.' + $json.body }}",
+        "dataPropertyName": "signature",
+        "encoding": "hex"
+      },
+      "id": "node-sign-replay",
+      "name": "Sign Replay",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        2220,
+        -20
+      ],
+      "credentials": {
+        "crypto": {
+          "id": "ltdCrmHmacDemo01",
+          "name": "LTD CRM webhook HMAC (demo)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8011/api/webhooks/crm/deal-won",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-LTD-Timestamp",
+              "value": "={{ $json.timestamp }}"
+            },
+            {
+              "name": "X-LTD-Signature",
+              "value": "=sha256={{ $json.signature }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 15000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          }
+        }
+      },
+      "id": "node-replay-deal-won-event",
+      "name": "Replay Deal-Won Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        -20
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// The identical event must be recognised as a duplicate (HTTP 200).\n// The relay returns only these fields; anything else means the request did not go\n// through the sanitizing relay, so stop immediately and pass nothing on.\nconst RELAY_FIELDS = ['status', 'client_id', 'invitation_id', 'event_id', 'code', 'field', 'relay'];\nconst res = $input.first().json;\nconst status = res.statusCode;\nconst body = res.body && typeof res.body === 'object' && !Array.isArray(res.body) ? res.body : {};\nconst unexpected = Object.keys(body).filter((k) => !RELAY_FIELDS.includes(k));\nif (unexpected.length) {\n  throw new Error(`Unsafe response: ${unexpected.length} field(s) outside the relay allowlist. Did the request bypass the relay?`);\n}\n\nconst eventId = $('Build Exact Raw Body').first().json.event_id;\nif (status === 200 && body.status === 'duplicate' && body.event_id === eventId) {\n  return [{ json: { replay_status: 200, replay_result: 'duplicate' } }];\n}\nif (status === 201) {\n  throw new Error('Replay failed: the backend accepted the replay as a NEW event (idempotency failure).');\n}\nconst code = typeof body.code === 'string' ? body.code : (typeof body.status === 'string' ? body.status : null);\nthrow new Error(`Replay failed: expected HTTP 200 duplicate, got HTTP ${status}${code ? ` (${code})` : ''}.`);\n"
+      },
+      "id": "node-validate-replay",
+      "name": "Validate Replay",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Replay error output: the relay could not be reached (no HTTP response).\nconst url = 'http://127.0.0.1:8011';\nconst err = $input.first().json.error || {};\nconst reason = String(err.code || err.description || err.message || 'connection error').slice(0, 120);\nthrow new Error(`Relay not reachable at ${url}: ${reason}. Start the relay and the API (see docs/n8n-demo.md).`);\n"
+      },
+      "id": "node-replay-relay-unreachable",
+      "name": "Replay Relay Unreachable",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// The only output of the demo: safe identifiers and outcomes. No request body,\n// signature, credential, onboarding URL or token.\nconst built = $('Build Exact Raw Body').first().json;\nconst first = $('Validate First Response').first().json;\nconst replay = $('Validate Replay').first().json;\nreturn [{ json: {\n  result: 'success',\n  crm_format: built.crm_format,\n  event_id: built.event_id,\n  deal_id: built.deal_id,\n  first_request: { status: first.first_status, result: first.first_result,\n                   client_id: first.client_id, invitation_id: first.invitation_id },\n  replay: { status: replay.replay_status, result: replay.replay_result },\n  message: 'The deal-won event was accepted once and the identical replay was recognised as a duplicate. The client invitation link was not exposed.',\n} }];\n"
+      },
+      "id": "node-present-safe-demo-result",
+      "name": "Present Safe Demo Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        -40
+      ]
+    }
+  ],
+  "connections": {
+    "Run Demo": {
+      "main": [
+        [
+          {
+            "node": "Select CRM Example",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select CRM Example": {
+      "main": [
+        [
+          {
+            "node": "Check Relay Endpoint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Relay Endpoint": {
+      "main": [
+        [
+          {
+            "node": "Generate Demo ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Demo ID": {
+      "main": [
+        [
+          {
+            "node": "Normalize CRM Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize CRM Payload": {
+      "main": [
+        [
+          {
+            "node": "Build Exact Raw Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Exact Raw Body": {
+      "main": [
+        [
+          {
+            "node": "Create Webhook Timestamp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Webhook Timestamp": {
+      "main": [
+        [
+          {
+            "node": "Sign Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Webhook": {
+      "main": [
+        [
+          {
+            "node": "Send Deal-Won Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Deal-Won Event": {
+      "main": [
+        [
+          {
+            "node": "Validate First Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Relay Unreachable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate First Response": {
+      "main": [
+        [
+          {
+            "node": "Create Replay Timestamp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Replay Timestamp": {
+      "main": [
+        [
+          {
+            "node": "Sign Replay",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sign Replay": {
+      "main": [
+        [
+          {
+            "node": "Replay Deal-Won Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Replay Deal-Won Event": {
+      "main": [
+        [
+          {
+            "node": "Validate Replay",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Replay Relay Unreachable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Replay": {
+      "main": [
+        [
+          {
+            "node": "Present Safe Demo Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": false,
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveExecutionProgress": false
+  },
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}

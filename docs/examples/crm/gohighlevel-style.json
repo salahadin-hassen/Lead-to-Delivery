@@ -1,0 +1,20 @@
+{
+  "event_id": "ghl_opp_status_8f2c1e4a-won",
+  "event_type": "deal.won",
+  "occurred_at": "2026-11-07T15:42:10+00:00",
+  "source": "gohighlevel",
+  "deal": {
+    "external_id": "opp_7Hk2Lq9Zt4",
+    "name": "Local SEO - Monthly Retainer",
+    "value": 1200,
+    "currency": "USD",
+    "service_type": "seo_retainer"
+  },
+  "contact": {
+    "external_id": "cnt_Xa81PqR2mN",
+    "name": "Jordan Rivera",
+    "email": "jordan@riverabakery.example",
+    "company": "Rivera Bakery",
+    "phone": "+15555550123"
+  }
+}

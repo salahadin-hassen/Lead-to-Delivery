@@ -1,0 +1,40 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+secrets/
+*service-account*.json
+*.pem
+*.key
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node / frontend (later tasks)
+node_modules/
+dist/
+
+# n8n local data (later tasks)
+var/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Local data, logs and test artefacts
+*.log
+*.sqlite
+*.sqlite-*
+*.db
+*.dump
+*.sql.gz
+coverage/
+test-results/
+playwright-report/
