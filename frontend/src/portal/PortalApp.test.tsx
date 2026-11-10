@@ -74,6 +74,19 @@ describe('invitation link handling', () => {
     expect(calls.some((c) => c.path.startsWith('/api/admin'))).toBe(false);
   });
 
+  it('picks up a link opened in a tab that already shows the portal', async () => {
+    const calls = mockFetch({ 'GET /api/portal/me': { body: me('project', 'submitted') },
+                              'GET /api/portal/project': { body: project } });
+    open('/portal');
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Open your access link' });
+    window.history.replaceState(null, '', `/portal#t=${TOKEN}`);
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    expect(await screen.findByRole('heading', { name: 'Example site' })).toBeTruthy();
+    expect(window.location.hash).toBe('');
+    expectTokenOnlyInHeader(calls);
+  });
+
   it('rejects a malformed token without calling the API', async () => {
     const calls = mockFetch({});
     open('/portal#t=short');
@@ -130,6 +143,8 @@ describe('onboarding form', () => {
     expect(screen.getByLabelText('Preferred CMS', { exact: false }).tagName).toBe('SELECT');
     expect(screen.getByLabelText('Roughly how many pages?', { exact: false }).getAttribute('type')).toBe('number');
     expect(screen.getByLabelText('Desired delivery date', { exact: false }).getAttribute('type')).toBe('date');
+    expect(screen.getByLabelText('Current website (if any)', { exact: false }).getAttribute('type')).toBe('url');
+    expect(screen.queryByText(/At least 1 characters/)).toBeNull();
   });
 
   it('shows field errors and sends nothing while required answers are missing', async () => {
@@ -174,7 +189,8 @@ describe('onboarding form', () => {
     });
     fillRequired();
     fireEvent.click(screen.getByRole('button', { name: 'Submit project details' }));
-    expect(await screen.findByText('desired_delivery_date must be in the future')).toBeTruthy();
+    expect(await screen.findByText('Must be in the future.')).toBeTruthy();
+    expect(screen.queryByText(/desired_delivery_date/)).toBeNull();
     expect(screen.getByLabelText('Desired delivery date', { exact: false }).getAttribute('aria-invalid')).toBe('true');
     expect(screen.getByRole('alert').textContent).toContain('Some answers need attention');
   });

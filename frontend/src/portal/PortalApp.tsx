@@ -81,15 +81,26 @@ export function PortalApp() {
 
   useEffect(() => {
     document.title = 'Project portal';
-    const state = captureToken();
-    if (state.kind === 'ok') {
-      tokenRef.current = state.token;
-      void load();
-    } else if (state.kind === 'malformed') {
-      setView({ kind: 'denied', ...DENIED.token_invalid });
-    } else {
-      setView({ kind: 'no_link' });
-    }
+    const apply = (initial: boolean) => {
+      const hadLink = window.location.hash.includes('t=');
+      const state = captureToken();
+      if (!initial && !hadLink) return;  // a fragment change that carries no link
+      if (state.kind === 'ok') {
+        tokenRef.current = state.token;
+        void load();
+      } else if (state.kind === 'malformed') {
+        tokenRef.current = null;
+        setView({ kind: 'denied', ...DENIED.token_invalid });
+      } else {
+        setView({ kind: 'no_link' });
+      }
+    };
+    apply(true);
+    // Opening a link in a tab that already shows /portal changes only the
+    // fragment (no page load), so pick the token up here too.
+    const onHash = () => apply(false);
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
   }, [load]);
 
   const submit = async (body: Record<string, unknown>) => {

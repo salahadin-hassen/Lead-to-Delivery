@@ -77,6 +77,11 @@ function initialValues(all: Section[], prefill: Record<string, unknown>): Raw {
   return values;
 }
 
+/** Free text long enough for a textarea (never a URL, email or date). */
+function isLongText(s: JsonSchema): boolean {
+  return s.type === 'string' && !s.format && !s.enum && (s.maxLength ?? 0) > 200;
+}
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function lines(value: string): string[] {
@@ -103,7 +108,8 @@ function validate(f: Field, raw: string): string | null {
     return null;
   }
   if (s.type === 'boolean' || s.enum) return null;
-  if (s.minLength !== undefined && value.length < s.minLength) return `Enter at least ${s.minLength} characters.`;
+  if (s.minLength !== undefined && value.length < s.minLength)
+    return s.minLength > 1 ? `Enter at least ${s.minLength} characters.` : 'This field is required.';
   if (s.maxLength !== undefined && value.length > s.maxLength) return `Enter at most ${s.maxLength} characters.`;
   if (s.format === 'email' && !EMAIL_RE.test(value)) return 'Enter a valid email address.';
   if (s.format === 'uri' && !/^https?:\/\/\S+\.\S+/i.test(value)) return 'Enter a full web address starting with https://.';
@@ -122,7 +128,7 @@ function toJson(all: Section[], values: Raw): Record<string, unknown> {
       else if (!value) continue;  // optional and empty: let the server apply its default
       else if (s.type === 'boolean') target[f.name] = value === 'yes';
       else if (s.type === 'integer') target[f.name] = Number(value);
-      else target[f.name] = s.type === 'string' && (s.maxLength ?? 0) > 200 ? raw.trim() : value;
+      else target[f.name] = value;
     }
     if (section.key) out[section.key] = target;
   }
@@ -157,7 +163,7 @@ function Control({ f, id, value, error, onChange }: {
       </select>
     );
   }
-  if (s.type === 'array' || (s.type === 'string' && (s.maxLength ?? 0) > 200)) {
+  if (s.type === 'array' || isLongText(s)) {
     return <textarea {...common} rows={s.type === 'array' ? 3 : 4} value={value}
                      onChange={(e) => onChange(e.target.value)} />;
   }
@@ -172,7 +178,7 @@ function hint(f: Field): string {
   const parts: string[] = [];
   if (!f.required && s.type !== 'array') parts.push('Optional.');
   if (s.type === 'array') parts.push(`One per line${s.maxItems ? `, up to ${s.maxItems}` : ''}. Optional.`);
-  if (s.type === 'string' && (s.maxLength ?? 0) > 200 && s.minLength) parts.push(`At least ${s.minLength} characters.`);
+  if (isLongText(s) && (s.minLength ?? 0) > 1) parts.push(`At least ${s.minLength} characters.`);
   if (s.format === 'date') parts.push('Must be a future date.');
   return parts.join(' ');
 }
@@ -249,7 +255,11 @@ export function serverFieldErrors(fieldErrors: { loc: (string | number)[]; msg: 
   for (const e of fieldErrors) {
     const path = e.loc[0] === 'body' ? e.loc.slice(1) : e.loc;
     const key = path.filter((p) => typeof p === 'string').join('.');
-    if (key && !out[key]) out[key] = e.msg.replace(/^Value error, /, '');
+    const field = String(path[path.length - 1] ?? '');
+    let msg = e.msg.replace(/^Value error, /, '');
+    if (field && msg.startsWith(`${field} `)) msg = msg.slice(field.length + 1);
+    msg = msg.charAt(0).toUpperCase() + msg.slice(1);
+    if (key && !out[key]) out[key] = /[.!?]$/.test(msg) ? msg : `${msg}.`;
   }
   return out;
 }
