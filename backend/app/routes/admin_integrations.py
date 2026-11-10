@@ -23,6 +23,7 @@ from app.routes.admin import Limit, Offset, ok, page
 from app.routes.admin_deps import csrf_protect, require_admin
 from app.schemas.admin import JobResolveDelivered, JobRetry
 from app.services import job_admin
+from app.services.admin_auth import AdminSession
 from app.store import admin_queries as q
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(csrf_protect), Depends(require_admin)])
@@ -112,12 +113,12 @@ def get_job(job_id: UUID) -> JSONResponse:
 
 
 @router.post("/integration-jobs/{job_id}/retry")
-def retry_job(job_id: UUID, body: JobRetry) -> JSONResponse:
+def retry_job(job_id: UUID, body: JobRetry, session: AdminSession = Depends(require_admin)) -> JSONResponse:
     """Delegates to services.job_admin.retry_dead_job: dead jobs only, and an
     unknown outcome needs reconciliation_confirmed=true."""
     try:
         result = job_admin.retry_dead_job(job_id, additional_attempts=body.additional_attempts,
-                                          reconciliation_confirmed=body.reconciliation_confirmed, actor="admin")
+                                          reconciliation_confirmed=body.reconciliation_confirmed, actor=session.email)
     except JobNotFoundError as exc:
         raise NotFoundError() from exc
     except JobNotRetryableError as exc:
@@ -135,12 +136,13 @@ def retry_job(job_id: UUID, body: JobRetry) -> JSONResponse:
 
 
 @router.post("/integration-jobs/{job_id}/resolve-delivered")
-def resolve_delivered(job_id: UUID, body: JobResolveDelivered) -> JSONResponse:
+def resolve_delivered(job_id: UUID, body: JobResolveDelivered,
+                      session: AdminSession = Depends(require_admin)) -> JSONResponse:
     """Slack only: the administrator found the message in the channel after an
     unknown outcome. Marks the job succeeded without sending anything."""
     try:
         job_admin.resolve_slack_delivered(job_id, message_found_in_channel=body.message_found_in_channel,
-                                          actor="admin")
+                                          actor=session.email)
     except JobNotFoundError as exc:
         raise NotFoundError() from exc
     except JobNotResolvableError as exc:

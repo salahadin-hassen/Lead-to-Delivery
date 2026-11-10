@@ -43,7 +43,8 @@ describe('route protection and login', () => {
     fill('right', '123456');
     expect(await screen.findByRole('heading', { name: 'Dashboard' })).toBeTruthy();
     expect(screen.getByText('Dana Admin')).toBeTruthy();
-    expect(calls.filter((c) => c.path === '/api/admin/dashboard').length).toBeGreaterThan(0);
+    // The heading renders before the dashboard request is sent: wait for it.
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/admin/dashboard').length).toBeGreaterThan(0));
     expect(localStorage.length + sessionStorage.length).toBe(0);
 
     fireEvent.click(screen.getByRole('button', { name: 'Sign out on all devices' }));

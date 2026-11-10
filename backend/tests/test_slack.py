@@ -432,7 +432,7 @@ def test_admin_resolve_endpoint(db_conn, migrated_database, pool_cleanup, fake) 
         ok = client.post(f"/api/admin/integration-jobs/{job_id}/resolve-delivered",
                          json={"message_found_in_channel": True}, headers=XHR)
         assert ok.status_code == 200 and ok.json()["status"] == "succeeded"
-        assert ok.json()["resolution"]["resolved_by"] == "admin"
+        assert ok.json()["resolution"]["resolved_by"] == "admin@agency.example"
         again = client.post(f"/api/admin/integration-jobs/{job_id}/resolve-delivered",
                             json={"message_found_in_channel": True}, headers=XHR)
         assert (again.status_code, again.json()["code"]) == (409, "job_not_resolvable_not_dead")

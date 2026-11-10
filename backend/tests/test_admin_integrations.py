@@ -5,7 +5,7 @@ import pytest
 from app.jobs import runner
 from app.jobs.registry import Handler, HandlerRegistry
 from app.jobs.result import IntegrationResult
-from tests.admin_helpers import XHR, admin_app, logged_in, post
+from tests.admin_helpers import EMAIL, XHR, admin_app, logged_in, post
 from tests.crm_helpers import encode, payload, signed_headers
 from tests.portal_helpers import new_invitation, submit
 
@@ -97,7 +97,7 @@ def test_retry_dead_job_through_api(client, db_conn) -> None:
     assert len(response.json()["attempt_history"]) == 1  # history preserved
     act = db_conn.execute("SELECT actor_type, data FROM activity_events WHERE event_type = 'integration.job_requeued'"
                           ).fetchone()
-    assert act["actor_type"] == "admin" and act["data"]["requested_by"] == "admin"
+    assert act["actor_type"] == "admin" and act["data"]["requested_by"] == EMAIL
 
 
 def test_unknown_outcome_requires_explicit_confirmation(client, db_conn) -> None:
@@ -111,7 +111,7 @@ def test_unknown_outcome_requires_explicit_confirmation(client, db_conn) -> None
     accepted = post(client, f"/api/admin/integration-jobs/{job_id}/retry",
                     {"additional_attempts": 1, "reconciliation_confirmed": True})
     assert accepted.status_code == 200
-    assert accepted.json()["reconciliation"]["confirmed_by"] == "admin"
+    assert accepted.json()["reconciliation"]["confirmed_by"] == EMAIL  # the administrator who confirmed
 
 
 @pytest.mark.parametrize("status", ["pending", "succeeded", "running"])
