@@ -12,6 +12,17 @@ plan is [deployment-preflight.md](deployment-preflight.md).
 explicitly delegated access. Anything that creates, changes or pays for
 infrastructure is Owner-approved, even if the agent prepares it.
 
+
+> **Staging vs production.** This runbook is the plan for a **paid
+> production** deployment and is not approved for execution (budget $0).
+> Staging at $0 follows [free-staging-options.md](free-staging-options.md)
+> (Render Free + Neon Free + the manual [staging worker](staging-worker.md)),
+> which deliberately differs: publicly reachable, application-authenticated,
+> synthetic data only; no background-worker service; no private network
+> (the Neon Free endpoint is internet-reachable, no IP Allow on Free); 6-hour
+> restore history; cold starts. Nothing in Phases A–I may be provisioned
+> without explicit approval of the cost.
+
 ## Phase A — Provider and account setup
 
 | Step | Action | Who | Inputs | Expected result | Verify | Failure / rollback |
@@ -27,14 +38,14 @@ infrastructure is Owner-approved, even if the agent prepares it.
 |---|---|---|---|---|---|---|
 | B1 | Create Render Postgres 16, plan `0.1c-256mb` ($6), same region as services, name `ltd-prod-db`, database `ltd` | Owner | Region | DB "available"; default user = owner role | Dashboard; `psql "<external URL>" -c 'select version()'` from your machine | Delete DB (no data yet) |
 | B2 | Restrict external access (IP allow list: your IP only, or none) | Owner | Your IP | Only internal + your IP can connect | Connection from another network fails | Edit allow list |
-| B3 | Create the restricted app user `ltd_app` (Render Credentials page/API, or `CREATE ROLE ltd_app LOGIN PASSWORD …` as the default user); apply the database/schema statements from [deploy/db-roles.sql](../deploy/db-roles.sql) adapted to the default user as owner | Owner (agent can prepare exact SQL) | Owner URL | Two credentials: owner, `ltd_app` | `psql` as `ltd_app`: `create table x(i int)` → permission denied | Drop role; if user creation is impossible, record the decision to run as owner (P1 risk) |
+| B3 | Create the restricted app user with `CREATE ROLE ltd_app LOGIN` + `\password ltd_app` as the default user (Render's "new default credential" is credential rotation, not a restricted role); apply the statements in [render-staging.md](render-staging.md) §6 | Owner (agent prepares SQL) | Owner URL | Two roles: owner, `ltd_app` | As `ltd_app`: `create table x(i int)` → permission denied | If `CREATE ROLE` is refused: **stop** — never give the services the owner credentials; resolve with Render support |
 | B4 | Store both URLs in your password manager; **direct internal URL** for services, external URL only for operator migrations | Owner | — | — | — | Rotate passwords in Render |
 
 ## Phase C — API and worker services (no public traffic yet)
 
 | Step | Action | Who | Inputs | Expected result | Verify | Failure / rollback |
 |---|---|---|---|---|---|---|
-| C1 | Create an **environment group** `ltd-prod` shared by both services (D6) with the non-secret values from the preflight table (`APP_ENV=production`, `APP_BASE_URL=https://<service>.onrender.com` for now, `FORWARDED_ALLOW_IPS` once known — see H5) | Owner (agent prepares the list) | Preflight §3 | Group exists | Values listed (no secrets yet) | Edit group |
+| C1 | (Render: the Blueprint [`deploy/render/render.paid-staging.yaml`](../deploy/render/render.paid-staging.yaml) declares per-service variables instead — environment groups cannot hold `sync: false` secrets; see [render-staging.md](render-staging.md)) Create an **environment group** `ltd-prod` shared by both services (D6) with the non-secret values from the preflight table (`APP_ENV=production`, `APP_BASE_URL=https://<service>.onrender.com` for now, `FORWARDED_ALLOW_IPS` once known — see H5) | Owner (agent prepares the list) | Preflight §3 | Group exists | Values listed (no secrets yet) | Edit group |
 | C2 | Create the web service `ltd-api` (0.5c-512mb, $7), runtime **Docker**, Dockerfile `./Dockerfile`, context `.`, branch `main`, auto-deploy **off**, default command (no override), health check `/api/health` | Owner | C1 | First image build runs | Build log shows both stages succeeded; no build-argument warnings mention secrets; CI `image` job green on the same commit | Fix the Dockerfile in the repo; nothing is live yet |
 | C3 | Create the background worker `ltd-worker` (0.5c-512mb, $7), runtime Docker, same Dockerfile, same group, Docker command `python -m app.jobs.worker`, shutdown delay ≥ 60 s | Owner | C1 | Worker starts | Log: `worker started: id=… handlers=[…]` | Suspend worker |
 | C4 | Expect the API to start and report **503** on `/api/health` (schema not migrated) and to refuse to start until secrets exist (fail-closed) | — | — | 503 / startup error naming the missing setting | Logs name the setting, never a value | — |
@@ -44,8 +55,8 @@ infrastructure is Owner-approved, even if the agent prepares it.
 | Step | Action | Who | Inputs | Expected result | Verify | Failure / rollback |
 |---|---|---|---|---|---|---|
 | D1 | Generate **new** secrets on your machine: `python -m app.mfa generate-key` → `ADMIN_MFA_ENCRYPTION_KEY`; `python3 -c "import secrets;print(secrets.token_urlsafe(48))"` → `CRM_WEBHOOK_SECRET`. Never reuse demo/staging/local values | Owner | — | Two values in your password manager | Length check only | Regenerate |
-| D2 | Add as **secret** env vars: `DATABASE_URL` (`ltd_app`, internal), `ADMIN_MFA_ENCRYPTION_KEY`, `CRM_WEBHOOK_SECRET` | Owner | D1, B4 | API starts | `/api/health` still 503 until Phase F | Remove/replace values |
-| D3 | (after F2) Create the first administrator from a trusted shell with the production environment (Render Shell, if available on the plan, or your machine with the **external** owner/app URL): `python -m app.admin_users create --email <you> --name "<name>"`; store recovery codes offline | Owner | Authenticator app | Account with MFA; 10 recovery codes | Sign in at `/admin` | `app.admin_users disable/reset-mfa` |
+| D2 | Add as **secret** env vars: `DATABASE_URL` (`ltd_app`, internal), `ADMIN_MFA_ENCRYPTION_KEY`, `CRM_WEBHOOK_SECRET` (the worker gets its own independently generated MFA/webhook values, which it never reads but start-up validation requires; [render-staging.md](render-staging.md) §7) | Owner | D1, B4 | API starts | `/api/health` still 503 until Phase F | Remove/replace values |
+| D3 | (after F2) Create the first administrator from a trusted shell with the production environment (on Render: your machine with the `ltd_app` **external** URL through a temporary `/32` database allow-list entry — the image's non-root user has no login shell, so Render Shell/SSH cannot run it; [render-staging.md](render-staging.md) step 8): `python -m app.admin_users create --email <you> --name "<name>"`; store recovery codes offline | Owner | Authenticator app | Account with MFA; 10 recovery codes | Sign in at `/admin` | `app.admin_users disable/reset-mfa` |
 
 ## Phase E — Domain and HTTPS
 
@@ -60,8 +71,8 @@ infrastructure is Owner-approved, even if the agent prepares it.
 
 | Step | Action | Who | Inputs | Expected result | Verify | Failure / rollback |
 |---|---|---|---|---|---|---|
-| F1 | From your machine at commit `<SHA>` (checked out, clean): `cd backend && DATABASE_URL='<owner external URL, sslmode=require>' .venv/bin/python -m app.migrations` (D3: owner credentials stay off the services) | Owner (agent can run it only with delegated credentials and explicit approval) | Owner URL | `schema at version 0006` | `--status` shows no PENDING | Migration failure rolls back its own transaction; fix with a new migration; DB is empty so it can be dropped and recreated |
-| F2 | If `ltd_app` exists, run the GRANT block at the end of `deploy/db-roles.sql` as the owner | Owner | — | Grants in place | `ltd_app`: `select count(*) from schema_migrations` works; `drop table clients` fails | Re-run grants |
+| F1 | From your machine at commit `<SHA>` (checked out, clean): `cd backend && export LTD_DISABLE_DOTENV=1 && read -rs DATABASE_URL && export DATABASE_URL && .venv/bin/python -m app.migrations` (paste the owner external URL with `?sslmode=require` at the silent prompt, so it never enters shell history; on Render via a temporary `/32` allow-list entry) (D3: owner credentials stay off the services) | Owner (agent can run it only with delegated credentials and explicit approval) | Owner URL | `schema at version 0006` | `--status` shows no PENDING | Migration failure rolls back its own transaction; fix with a new migration; DB is empty so it can be dropped and recreated |
+| F2 | If `ltd_app` exists, as the owner: `psql -1 -v ON_ERROR_STOP=1 -f deploy/db-app-grants.sql -f deploy/db-app-check.sql` | Owner | — | Grants in place, check silent | `ltd_app`: `select count(*) from schema_migrations` works; `drop table clients` fails | Re-run grants |
 | F3 | Manually deploy the same `<SHA>` on both services | Owner | — | Both live | `/api/health` → 200; `/api/health/worker` → 200 within 90 s | Render rollback to previous deploy |
 | F4 | Record the deployed SHA in the deployment log | Owner/Agent | — | SHA recorded | Render dashboard "Deploy" shows SHA | — |
 
@@ -81,7 +92,7 @@ infrastructure is Owner-approved, even if the agent prepares it.
 | H2 | **Restore drill**: PITR to a new instance, run `python -m app.migrations --status` against it, compare row counts, delete it | Owner (agent can script) | — | Restored DB matches | Counts and schema 6 | Delete the recovery instance |
 | H3 | Before each release: on-demand logical export; weekly: `pg_dump -Fc` to encrypted off-platform storage | Owner | Storage choice | Dumps exist | File present and restorable | — |
 | H4 | External uptime monitor (e.g. any HTTP checker) on `/api/health` and `/api/health/worker`, alert after 2–3 failures; platform deploy-failure notifications on | Owner | Monitor account | Alerts reach you | Stop the worker → alert fires; start it again | — |
-| H5 | **Proxy trust (D1)**: identify the platform's proxy source range, set `--forwarded-allow-ips` to it; make one failed login and check `select source_key from admin_login_attempts order by created_at desc limit 1` shows **your** public IP | Owner + Agent | Read-only DB query | Real client address recorded | Query result | Revert start command |
+| H5 | **Proxy trust (D1)**: Render documents no proxy source range and Cloudflare appends to `X-Forwarded-For` ([render-staging.md](render-staging.md) §4). Keep `FORWARDED_ALLOW_IPS=127.0.0.1` (never `*`). Before a public pilot: application support for `CF-Connecting-IP` (separate code task), then make one failed login and check `select source_key from admin_login_attempts order by created_at desc limit 1` shows **your** public IP | Owner + Agent | Code change, read-only DB query | Real client address recorded | Query result | Keep the 127.0.0.1 setting (shared throttling bucket) |
 
 ## Phase I — Smoke tests and controlled pilot
 

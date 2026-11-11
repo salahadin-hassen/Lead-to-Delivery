@@ -67,7 +67,7 @@ row counts and schema version 6 identical):**
 createdb -O ltd_owner ltd_restore                              # as the DB admin
 pg_restore -d "postgresql://ltd_owner@HOST/ltd_restore" --no-owner --exit-on-error ltd-….dump
 DATABASE_URL="postgresql://ltd_owner@HOST/ltd_restore" .venv/bin/python -m app.migrations --status
-# re-run the GRANT block from deploy/db-roles.sql for ltd_app, then point
+# re-run deploy/db-app-grants.sql + deploy/db-app-check.sql (psql -1) as the owner, then point
 # DATABASE_URL at the restored database and restart API and worker
 ```
 

@@ -1,0 +1,198 @@
+# Manually started, time-boxed integration worker for the $0 staging
+# (Render Free API + Neon Free database; see docs/staging-worker.md).
+#
+# * workflow_dispatch only, main only, one run at a time (never cancels a
+#   running worker), read-only token, no registry push, no deployment.
+# * Builds the committed Dockerfile and runs `python -m app.jobs.worker` from
+#   that image - the same image and worker code the staging API runs.
+# * Secrets come only from the protected `staging-worker` environment:
+#   STAGING_LTD_APP_DATABASE_URL (the restricted ltd_app role, Neon DIRECT
+#   endpoint, sslmode=require). Owner/migration credentials never belong here;
+#   a preflight refuses to start the worker unless the connection is ltd_app,
+#   over TLS, with exactly the deploy/db-app-check.sql privilege policy, on the
+#   schema version this commit expects.
+# * The worker never reads ADMIN_MFA_ENCRYPTION_KEY or CRM_WEBHOOK_SECRET;
+#   production start-up validation requires them, so random throwaway values
+#   are generated per run (never the API's secrets).
+# * Stop: `docker stop` sends SIGTERM; the worker finishes its current job and
+#   exits 0 within the 120 s grace period. If the runner dies instead, the
+#   job's 120 s lease expires and the next worker run records the attempt as
+#   `unknown` (reconciliation before retry) - no blind duplicate.
+name: Staging worker (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Minutes to process jobs before a graceful stop (1-15)"
+        required: true
+        default: "10"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-worker
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: Check ref and inputs (no secrets)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      seconds: ${{ steps.limits.outputs.seconds }}
+    steps:
+      - name: Refuse anything but main
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::The staging worker runs only from refs/heads/main (got $GITHUB_REF)."
+            exit 1
+          fi
+      - name: Validate the time limit
+        id: limits
+        env:
+          MINUTES: ${{ inputs.minutes }}
+        run: |
+          if ! [[ "$MINUTES" =~ ^[0-9]{1,2}$ ]]; then
+            echo "::error::minutes must be a whole number from 1 to 15."
+            exit 1
+          fi
+          minutes=$((10#$MINUTES))   # base 10: "08" is eight, not invalid octal
+          if [ "$minutes" -lt 1 ] || [ "$minutes" -gt 15 ]; then
+            echo "::error::minutes must be a whole number from 1 to 15."
+            exit 1
+          fi
+          echo "seconds=$((minutes * 60))" >> "$GITHUB_OUTPUT"
+
+  worker:
+    name: Run the staging worker (bounded)
+    needs: guard
+    runs-on: ubuntu-24.04
+    # Approval, branch restriction and secrets are configured on this
+    # environment in the repository settings (docs/staging-worker.md).
+    environment: staging-worker
+    timeout-minutes: 25
+    env:
+      IMAGE: ltd-staging-worker:${{ github.sha }}
+      CONTAINER: ltd-staging-worker-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the committed image (no push)
+        run: docker build --pull --tag "$IMAGE" .
+
+      - name: Prepare worker-only settings
+        env:
+          APP_BASE_URL_VALUE: ${{ vars.STAGING_APP_BASE_URL }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$APP_BASE_URL_VALUE" =~ ^https://[A-Za-z0-9.-]+$ ]]; then
+            echo "::error::Environment variable STAGING_APP_BASE_URL must be the API's https:// origin."
+            exit 1
+          fi
+          # Throwaway values: the worker never reads them; production
+          # validation requires them to exist.
+          mfa=$(python3 -c "import base64,secrets;print(base64.b64encode(secrets.token_bytes(32)).decode())")
+          hook=$(python3 -c "import secrets;print(secrets.token_urlsafe(48))")
+          echo "::add-mask::$mfa"
+          echo "::add-mask::$hook"
+          {
+            echo "APP_ENV=production"
+            echo "APP_BASE_URL=$APP_BASE_URL_VALUE"
+            echo "ADMIN_MFA_ENCRYPTION_KEY=$mfa"
+            echo "CRM_WEBHOOK_SECRET=$hook"
+            echo "WORKER_ID=gha-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          } >> "$GITHUB_ENV"
+
+      - name: Preflight - restricted role, TLS, no DDL, schema current
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_LTD_APP_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Secret STAGING_LTD_APP_DATABASE_URL is not set in the staging-worker environment."
+            exit 1
+          fi
+          # deploy/db-app-check.sql (the same exact-policy check the setup
+          # helper and the CI smoke test run) is mounted read-only.
+          docker run --rm -i --env DATABASE_URL \
+            --volume "$GITHUB_WORKSPACE/deploy/db-app-check.sql:/policy/db-app-check.sql:ro" \
+            "$IMAGE" python - <<'PY'
+          import os, sys
+          import psycopg
+          from app import migrations
+          try:
+              conn = psycopg.connect(os.environ["DATABASE_URL"], connect_timeout=15)
+          except Exception as exc:  # never print the URL or the driver message
+              sys.exit(f"cannot connect: {type(exc).__name__}")
+          problems = []
+          with conn:
+              user, superuser, can_create, ssl, db_version = conn.execute("""
+                  SELECT current_user,
+                         (SELECT rolsuper FROM pg_roles WHERE rolname = current_user),
+                         has_schema_privilege(current_user, 'public', 'CREATE'),
+                         (SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()),
+                         (SELECT max(version) FROM schema_migrations)
+              """).fetchone()
+              try:  # exact privilege matrix; the message names roles/objects only
+                  conn.execute(open("/policy/db-app-check.sql").read())
+              except psycopg.Error as exc:
+                  problems.append("privilege policy: " + (exc.diag.message_primary or type(exc).__name__))
+          if user != "ltd_app":
+              problems.append("connected role is not ltd_app")
+          if superuser or can_create:
+              problems.append("role can create schema objects")
+          if not ssl:
+              problems.append("connection is not encrypted (use sslmode=require)")
+          if db_version != migrations.latest_version():
+              problems.append(f"schema version {db_version}, this commit expects {migrations.latest_version()}")
+          if problems:
+              sys.exit("refusing to start the worker: " + "; ".join(problems))
+          print(f"preflight ok: role ltd_app, TLS, exact privilege policy, schema {db_version}")
+          PY
+
+      - name: Run the worker for the requested time, then stop it gracefully
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_LTD_APP_DATABASE_URL }}
+          SECONDS_TO_RUN: ${{ needs.guard.outputs.seconds }}
+        run: |
+          set -euo pipefail
+          # Values are passed by NAME only (docker reads them from this
+          # environment), so they never appear in a command line.
+          docker run -d --name "$CONTAINER" --stop-timeout 120 \
+            --env APP_ENV --env APP_BASE_URL --env DATABASE_URL \
+            --env ADMIN_MFA_ENCRYPTION_KEY --env CRM_WEBHOOK_SECRET --env WORKER_ID \
+            "$IMAGE" python -m app.jobs.worker >/dev/null
+          echo "worker started; graceful stop in ${SECONDS_TO_RUN}s"
+          end=$((SECONDS + SECONDS_TO_RUN))
+          while [ "$SECONDS" -lt "$end" ]; do
+            if [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER")" != "true" ]; then
+              echo "::error::The worker exited before the time limit."
+              docker logs "$CONTAINER" 2>&1 | tail -n 50
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "time limit reached: sending SIGTERM (up to 120 s to finish the current job)"
+          docker stop --time 120 "$CONTAINER" >/dev/null
+          docker logs "$CONTAINER" 2>&1 | tail -n 200
+          code=$(docker inspect -f '{{.State.ExitCode}}' "$CONTAINER")
+          if [ "$code" != "0" ]; then
+            echo "::error::The worker exited with code $code."
+            exit 1
+          fi
+          docker logs "$CONTAINER" 2>&1 | grep -q "worker stopped" || { echo "::error::No clean-stop log line."; exit 1; }
+          echo "worker stopped cleanly"
+
+      - name: Stop and remove the container (also after failure or cancellation)
+        if: always()
+        run: |
+          if docker inspect "$CONTAINER" >/dev/null 2>&1; then
+            docker stop --time 60 "$CONTAINER" >/dev/null 2>&1 || true
+            docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+          fi
+          docker image rm -f "$IMAGE" >/dev/null 2>&1 || true

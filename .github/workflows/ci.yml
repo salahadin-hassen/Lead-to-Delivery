@@ -43,8 +43,8 @@ jobs:
         run: |
           shellcheck --version
           "$RUNNER_TEMP/actionlint" -color
-      - name: Shellcheck the CI and release scripts (warnings and errors)
-        run: shellcheck --severity=warning .github/ci/*.sh deploy/release.sh
+      - name: Shellcheck the CI, release and staging-setup scripts (warnings and errors)
+        run: shellcheck --severity=warning .github/ci/*.sh deploy/release.sh scripts/neon-staging-setup.sh scripts/tests/neon-setup/run.sh
 
   backend:
     name: Backend tests (Python 3.12.16, PostgreSQL 16)

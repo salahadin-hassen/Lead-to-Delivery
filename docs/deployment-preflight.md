@@ -72,7 +72,7 @@ provisioning time. **unverified** = needs confirmation on the platform.
 | Health check path | `/api/health` (platform health check); `/api/health/worker` (external monitor) |
 | Migration | `cd backend && DATABASE_URL=<ltd_owner direct URL> python -m app.migrations`, **before** the new code starts; verify with `--status` |
 | Extensions | None. `gen_random_uuid()` is built into PostgreSQL 13+; target PostgreSQL 16 |
-| Database privileges | `ltd_owner`: owns DB and `public` schema. `ltd_app`: CONNECT; USAGE on `public`; SELECT/INSERT/UPDATE/DELETE on tables; USAGE/SELECT on sequences; default privileges from `ltd_owner` ([deploy/db-roles.sql](../deploy/db-roles.sql)). Creating `ltd_app` on Render Postgres via `CREATE USER` or the Credentials API is **unverified** |
+| Database privileges | `ltd_owner`: owns DB and `public` schema. `ltd_app`: CONNECT; USAGE on `public`; SELECT/INSERT/UPDATE/DELETE on operational tables, `schema_migrations` and `project_templates` read-only, no TRUNCATE/REFERENCES/TRIGGER; USAGE/SELECT on sequences; default privileges from the owner ([deploy/db-roles.sql](../deploy/db-roles.sql), [deploy/db-app-grants.sql](../deploy/db-app-grants.sql)). Creating `ltd_app` on Render Postgres via `CREATE USER` or the Credentials API is **unverified** |
 | Connectivity | Services → database over the provider's private (internal) URL in the same region; direct, not pooled; `sslmode=require` if the URL is external |
 | `FRONTEND_DIST_DIR` | Set in the image (`/app/frontend/dist`); do not override |
 
@@ -128,11 +128,11 @@ Launching with ClickUp, Slack and Google Sheets **disabled is safe**:
 | Invitation tokens | 256-bit, hash-only, expiring, revocable, invitation-scoped; fragment-only, memory-only in the browser | — | Yes |
 | Rate limiting / proxy trust | DB-backed per source/account/global throttling; **proxy range not yet set for the platform (D1)** | **Must fix D1** | Yes if the admin URL is not advertised and the account-level limit is relied on |
 | No edge rate limiting | Webhook and portal endpoints have no request-rate limit (HMAC/token required; bounded bodies) | Add platform/edge limits if traffic warrants | Yes |
-| Database permissions | Two-role model verified locally; platform user creation unverified | Must verify `ltd_app` cannot run DDL on the real DB | If unverifiable, pilot may run as owner **with the risk recorded** |
+| Database permissions | Two-role model verified locally; platform user creation unverified | Must verify `ltd_app` cannot run DDL on the real DB | No: the services must never run with the owner role; if `ltd_app` cannot be created, staging/pilot stops ([render-staging.md](render-staging.md) §6) |
 | Backups | Platform PITR (3 days on Render Hobby) + manual logical exports; restore tested locally only | Run one real PITR restore drill on the platform | Yes after the drill |
 | Backup encryption/retention | Provider-managed at rest (provider docs); local dumps must be stored encrypted; `ADMIN_MFA_ENCRYPTION_KEY` kept separately | Decide off-platform storage for weekly dumps | Yes |
 | Log redaction | Verified on staging; uvicorn access logs contain client addresses (personal data) | Set platform log retention | Yes |
-| Admin recovery | Server CLI (`app.admin_users`); needs a shell with production env (Render Shell on paid instances — unverified) or a one-off job | Confirm shell/job access before launch | Yes, if verified |
+| Admin recovery | Server CLI (`app.admin_users`); on Render it runs from the operator's machine through a temporary `/32` database allow-list entry — Render Shell/SSH needs a login shell the image deliberately lacks ([render-staging.md](render-staging.md)) | Confirm shell/job access before launch | Yes, if verified |
 | Incident response / rollback | Runbook exists ([operations-runbook.md](operations-runbook.md)); platform rollback = redeploy previous commit; schema forward-only | — | Yes |
 | Penetration test | **Not performed** | Recommended before wider public exposure | Not required for a small pilot |
 
@@ -161,6 +161,38 @@ Launching with ClickUp, Slack and Google Sheets **disabled is safe**:
 **P2 — acceptable for a pilot**
 D6–D10, no bulk job retry, no admin roles, no edge rate limiting, no
 penetration test (must stay true in all communication), integrations disabled.
+
+## 6a. Render findings (2026-11-11) — paid reference
+
+> The paid Render staging (≈ $20.30/month) was **not approved**: the staging
+> budget is $0/month. The $0 options and the recommended intermittent staging
+> (Render Free + Neon Free + the manual [staging worker](staging-worker.md))
+> are in [free-staging-options.md](free-staging-options.md): publicly
+> reachable, application-authenticated, synthetic data only — Render web
+> services (free or paid) are internet-reachable, and Neon Free has no IP
+> Allow. The findings below still apply to any Render deployment.
+
+Researched for a publicly reachable, application-authenticated staging ([render-staging.md](render-staging.md),
+[`deploy/render/render.paid-staging.yaml`](../deploy/render/render.paid-staging.yaml), validated against Render's schema):
+
+- **D1 (proxy trust): unresolved, evidence recorded.** Render documents no
+  proxy address range; its own articles state the app sees the proxy's
+  address, Cloudflare appends to `X-Forwarded-For` (leftmost entry
+  forgeable), and Cloudflare overwrites `CF-Connecting-IP` on every request.
+  Staging keeps `FORWARDED_ALLOW_IPS=127.0.0.1` (shared throttling bucket,
+  nothing spoofable). A public pilot needs `CF-Connecting-IP` support in the
+  application (code change) — still P1.
+- **D2 (direct connections): satisfied.** Render Postgres has no built-in
+  pooler; the internal URL is a direct connection; 16 of 100 connections.
+- **D3 (migration credentials): resolved by procedure.** No
+  `preDeployCommand`; migrations and admin bootstrap run from the operator's
+  machine through a temporary `/32` allow-list entry; `ipAllowList: []`
+  otherwise. `fromDatabase.connectionString` (owner) is never used.
+- **Role separation:** `ltd_app` via `CREATE ROLE`; whether Render's default
+  user may create roles is undocumented — a stop condition in staging step 4.
+- **Worker shutdown:** `maxShutdownDelaySeconds` 1–300 is documented for
+  background workers; 120 s configured.
+- **Port:** Render's `PORT` defaults to 10000; the image honours `$PORT`.
 
 ## 7. Readiness to provision
 

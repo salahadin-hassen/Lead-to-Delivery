@@ -36,8 +36,12 @@ migrations take a session advisory lock. Create two roles with
 - `ltd_owner` owns the schema and runs migrations (release step only);
 - `ltd_app` is what the API and worker use: read/write data, no DDL.
 
-Then, as `ltd_owner`, apply migrations once and run the `GRANT` block at the
-end of that file. Default privileges then cover later migrations.
+Then, as `ltd_owner`, apply migrations and run
+[`deploy/db-app-grants.sql`](../deploy/db-app-grants.sql) followed by
+[`deploy/db-app-check.sql`](../deploy/db-app-check.sql) in one transaction
+(`psql -1 -f … -f …`, again after every migration session): DML on
+operational tables, `schema_migrations` and `project_templates` read-only,
+no `TRUNCATE`/`REFERENCES`/`TRIGGER`/DDL; the check fails on any deviation.
 
 ```bash
 cd backend

@@ -1,0 +1,94 @@
+# PAID REFERENCE ONLY - NOT APPROVED, DO NOT APPLY.
+#
+# Render Blueprint for a PAID, publicly reachable staging (~$20.30/month: two 0.5c-512mb
+# services + a 0.1c-256mb database). The $0 staging decision is in
+# docs/free-staging-options.md. This file is deliberately NOT named render.yaml
+# and NOT at the repository root, so Render's "New Blueprint" flow does not
+# pick it up by default. Applying it creates billable resources.
+#
+# Read docs/render-staging.md before any use.
+#
+# Safety properties (do not weaken):
+# * No secret is stored here. Every secret is `sync: false`: Render asks for
+#   it once, when the Blueprint is first created, and never overwrites it.
+# * The API and worker get DATABASE_URL = the restricted `ltd_app` role's
+#   INTERNAL URL, entered by hand. `fromDatabase.connectionString` is NOT
+#   used anywhere: it carries the database's default (owner) user.
+# * No preDeployCommand and no migration in any start command: migrations run
+#   separately, from the operator's machine, with the owner credentials
+#   (docs/render-staging.md, step 5). Until then /api/health is 503 and the
+#   API's deploy does not go live.
+# * ipAllowList: [] -> no external database access. The operator temporarily
+#   allows their own /32 for the migration and admin-bootstrap steps only.
+# * No custom domain, no integrations (ClickUp/Slack/Sheets variables absent),
+#   auto-deploy off, explicit paid plans (no free-tier defaults).
+# * FORWARDED_ALLOW_IPS stays 127.0.0.1: Render documents no proxy range that
+#   could be trusted, so X-Forwarded-For is ignored (never "*").
+#
+# All three resources must be in the same region (private network).
+
+services:
+  - type: web
+    name: ltd-staging-api
+    runtime: docker
+    region: frankfurt
+    plan: 0.5c-512mb
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # No dockerCommand: the image's default CMD runs uvicorn on 0.0.0.0:$PORT.
+    healthCheckPath: /api/health
+    autoDeployTrigger: "off"
+    numInstances: 1
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_BASE_URL
+        sync: false   # https://<this service>.onrender.com (shown after creation)
+      - key: DATABASE_URL
+        sync: false   # ltd_app internal URL; see docs/render-staging.md
+      - key: ADMIN_MFA_ENCRYPTION_KEY
+        sync: false   # staging-only: python -m app.mfa generate-key
+      - key: CRM_WEBHOOK_SECRET
+        sync: false   # staging-only, 32+ characters
+      - key: FORWARDED_ALLOW_IPS
+        value: "127.0.0.1"
+      - key: WEB_CONCURRENCY
+        value: "2"
+
+  - type: worker
+    name: ltd-staging-worker
+    runtime: docker
+    region: frankfurt
+    plan: 0.5c-512mb
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: python -m app.jobs.worker
+    # SIGTERM -> the worker finishes its current job (HTTP timeout 15 s) and
+    # exits; a job interrupted anyway is recovered by its 120 s lease.
+    maxShutdownDelaySeconds: 120
+    autoDeployTrigger: "off"
+    numInstances: 1
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_BASE_URL
+        sync: false   # same value as the API (used in Slack message links)
+      - key: DATABASE_URL
+        sync: false   # same ltd_app internal URL as the API
+      # The worker never reads these two; production start-up validation
+      # requires them. Give it its OWN independently generated values, not the
+      # API's, so the real key and webhook secret never reach the worker.
+      - key: ADMIN_MFA_ENCRYPTION_KEY
+        sync: false
+      - key: CRM_WEBHOOK_SECRET
+        sync: false
+
+databases:
+  - name: ltd-staging-db
+    databaseName: ltd
+    user: ltd_owner
+    region: frankfurt
+    plan: 0.1c-256mb
+    postgresMajorVersion: "16"
+    diskSizeGB: 1
+    ipAllowList: []
