@@ -27,7 +27,10 @@ its relay (`backend/app/demo_relay.py`) are **never** deployed.
 ## 1. Database
 
 Use a dedicated PostgreSQL 16 database (TLS required on a managed provider:
-add `?sslmode=require` to the URLs). Create two roles with
+add `?sslmode=require` to the URLs). Use the **direct** (session) connection
+URL, not a transaction-mode pooler (PgBouncer, Neon's pooled URL): the pool
+sets a session `statement_timeout`, psycopg prepares statements, and
+migrations take a session advisory lock. Create two roles with
 [`deploy/db-roles.sql`](../deploy/db-roles.sql):
 
 - `ltd_owner` owns the schema and runs migrations (release step only);
@@ -76,10 +79,16 @@ are opaque server-side tokens, and there is no cross-origin access.
 
 ## 3. Build and run
 
+On a container platform use the production image instead of these commands:
+see [build-and-release.md](build-and-release.md) (one image; API by default,
+worker with `python -m app.jobs.worker`; proxy trust via
+`FORWARDED_ALLOW_IPS`). The commands below are for a single VM.
+
 ```bash
 # build (release step, at the commit being deployed)
 cd frontend && npm ci && npm run build
-cd backend && python3.12 -m venv .venv && .venv/bin/pip install .
+cd backend && python3.12 -m venv .venv && \
+    .venv/bin/pip install --require-hashes --only-binary=:all: -r requirements.lock
 
 # API: loopback only behind a proxy; trust X-Forwarded-For only from it
 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8010 --workers 2 \
@@ -89,18 +98,25 @@ cd backend && python3.12 -m venv .venv && .venv/bin/pip install .
 .venv/bin/python -m app.jobs.worker
 ```
 
-`--forwarded-allow-ips` must be the proxy's address (never `*`): login
-throttling uses the client address, and only the trusted proxy may set it.
-On a platform whose load balancer has changing addresses, set it to that
-platform's documented private range.
+`--forwarded-allow-ips` must be the proxy's address or range — **never `*`**
+(uvicorn then uses the leftmost, client-forgeable `X-Forwarded-For` entry,
+and some platforms, Render included, append to a client-supplied header) and
+**not `127.0.0.1` on a hosted platform** (the proxy is not on loopback, so
+every client would share one throttling bucket). On a platform, set it to
+the proxy's private source range and verify it as described in
+[production-runbook.md](production-runbook.md) step H5. On a platform the API
+must also listen on `0.0.0.0:$PORT` instead of `127.0.0.1:8010`.
 
 Single VM: [`deploy/ltd-api.service`](../deploy/ltd-api.service),
 [`deploy/ltd-worker.service`](../deploy/ltd-worker.service),
 [`deploy/Caddyfile.example`](../deploy/Caddyfile.example) and
 [`deploy/release.sh`](../deploy/release.sh) (build → migrate as owner →
-restart). On a platform (Render, Railway, Fly, etc.) the same three commands
-map to: one web service (API), one background worker, one pre-deploy command
-(migrations with the owner URL).
+restart). On a platform (Render, Railway, Fly, etc.) the same commands map to
+one web service (API) and one background worker. Migrations can run as a
+platform pre-deploy command, but that puts the owner (`ltd_owner`) URL into
+the service's environment; the first-deployment plan runs them from an
+operator machine instead (see [production-runbook.md](production-runbook.md),
+Phase F, and [deployment-preflight.md](deployment-preflight.md)).
 
 ## 4. Domain and HTTPS
 

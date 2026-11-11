@@ -16,7 +16,7 @@ echo "release: $(git rev-parse --short HEAD)"
 git diff --quiet && git diff --cached --quiet || { echo "refusing: uncommitted changes" >&2; exit 1; }
 
 (cd frontend && npm ci --no-audit --no-fund && npm run build)
-(cd backend && python3.12 -m venv .venv && .venv/bin/pip install -q --upgrade pip && .venv/bin/pip install -q .)
+(cd backend && python3.12 -m venv .venv && .venv/bin/pip install -q --require-hashes --only-binary=:all: -r requirements.lock)
 (cd backend && DATABASE_URL="$MIGRATION_DATABASE_URL" .venv/bin/python -m app.migrations)
 
 if command -v systemctl >/dev/null && systemctl list-unit-files ltd-api.service >/dev/null 2>&1; then

@@ -1,0 +1,131 @@
+# Continuous integration. Validates only: never deploys, needs no repository
+# secrets, and uses throwaway PostgreSQL service containers (never `ltd`, a
+# staging or a production database). Actions are pinned to commit SHAs.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Superseded pull-request runs are cancelled; every run on main completes.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Exactly the runtime image's interpreter (Dockerfile: python:3.12.16-slim-bookworm).
+  # Node comes from frontend/.nvmrc, exactly the Dockerfile's node:24.22.2 build stage.
+  PYTHON_VERSION: "3.12.16"
+  ACTIONLINT_VERSION: "1.7.12"
+  ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"  # public release checksum  # pragma: allowlist secret
+
+jobs:
+  workflow-lint:
+    name: Workflow lint (actionlint + shellcheck)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download actionlint (pinned version, verified checksum)
+        run: |
+          set -euo pipefail
+          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSLo "$RUNNER_TEMP/$tarball" "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$tarball"
+          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/$tarball" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP" actionlint
+      - name: Lint workflows (shellcheck checks the run scripts when installed)
+        run: |
+          shellcheck --version
+          "$RUNNER_TEMP/actionlint" -color
+      - name: Shellcheck the CI and release scripts (warnings and errors)
+        run: shellcheck --severity=warning .github/ci/*.sh deploy/release.sh
+
+  backend:
+    name: Backend tests (Python 3.12.16, PostgreSQL 16)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-bookworm@sha256:5264710be20f409750ac6dc4e5706dcef929c87e241605463f0f9aefa932a8d9
+        env:
+          POSTGRES_DB: ltd_test
+          # Ephemeral container reachable only from this job: no password.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # The suite refuses anything but a LOCAL database named exactly ltd_test,
+      # ignores .env (LTD_DISABLE_DOTENV) and refuses APP_ENV=production.
+      TEST_DATABASE_URL: postgresql://postgres@localhost:5432/ltd_test
+      LTD_DISABLE_DOTENV: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Interpreter must be exactly the image's
+        run: python -c "import sys; v='.'.join(map(str, sys.version_info[:3])); print(v); sys.exit(v != '${{ env.PYTHON_VERSION }}')"
+      # Node runs the n8n workflow's Code-node tests.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: frontend/.nvmrc
+      - name: Install locked dependencies (hash-verified, wheels only)
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: -r backend/requirements-dev.lock
+      - name: Verify the environment matches the lock
+        run: python -m pip check
+      - name: Run the full test suite
+        working-directory: backend
+        run: python -m pytest -q -p no:cacheprovider
+
+  frontend:
+    name: Frontend typecheck, tests and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Node must be exactly the image build stage's
+        run: test "$(node --version)" = "v$(cat .nvmrc)"
+      - run: npm ci --no-audit --no-fund
+      - name: Lockfile must be unchanged by the install
+        run: git diff --exit-code -- package-lock.json
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  image:
+    name: Production image build and smoke test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the real image (no build arguments, no secrets)
+        run: docker build --pull --tag ltd:ci .
+      - name: Smoke-test the built image (throwaway PostgreSQL, published port, API + worker)
+        run: bash .github/ci/image-smoke.sh ltd:ci
+      - name: Clean up containers and networks (also after failures)
+        if: always()
+        run: |
+          docker ps -aq --filter "name=ltdsmoke-" | xargs -r docker rm -f
+          docker network ls -q --filter "name=ltdsmoke-" | xargs -r docker network rm

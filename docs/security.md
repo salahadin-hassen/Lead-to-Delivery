@@ -97,8 +97,14 @@ email address.
 
 ## Known risks / not done
 
-- No external penetration test or dependency audit tool run (`pip-audit` /
-  `npm audit` not run; no network-free equivalent available).
+- No external penetration test has been performed. Dependency audit
+  2026-11-11: `pip-audit` on the installed backend environment and
+  `npm audit` on the frontend found no known vulnerabilities. All Python
+  dependencies, transitive included, are pinned with hashes in
+  `backend/requirements.lock` / `requirements-dev.lock`
+  ([build-and-release.md](build-and-release.md)).
+- Login throttling's per-source limit depends on correct proxy trust on the
+  hosting platform (preflight D1).
 - `ADMIN_MFA_ENCRYPTION_KEY` loss forces every administrator to re-enrol MFA.
 - A compromised server (env + database) compromises everything; there is no
   HSM/KMS integration.
