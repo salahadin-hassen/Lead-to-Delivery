@@ -125,17 +125,23 @@ jobs:
           import os, sys
           import psycopg
           from app import migrations
+          from app.dbtls import TlsState, client_tls_state
           try:
               conn = psycopg.connect(os.environ["DATABASE_URL"], connect_timeout=15)
           except Exception as exc:  # never print the URL or the driver message
               sys.exit(f"cannot connect: {type(exc).__name__}")
           problems = []
           with conn:
-              user, superuser, can_create, ssl, db_version = conn.execute("""
+              # TLS of THIS client connection (libpq PQsslInUse). Neon ends TLS
+              # at its proxy, so server-side pg_stat_ssl is false there. Checked
+              # before any query is sent; unverifiable counts as a refusal.
+              tls, tls_reason = client_tls_state(conn.pgconn)
+              if tls is not TlsState.ENCRYPTED:
+                  sys.exit(f"refusing to start the worker: connection is {tls.value} ({tls_reason}); use sslmode=require")
+              user, superuser, can_create, db_version = conn.execute("""
                   SELECT current_user,
                          (SELECT rolsuper FROM pg_roles WHERE rolname = current_user),
                          has_schema_privilege(current_user, 'public', 'CREATE'),
-                         (SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()),
                          (SELECT max(version) FROM schema_migrations)
               """).fetchone()
               try:  # exact privilege matrix; the message names roles/objects only
@@ -146,13 +152,11 @@ jobs:
               problems.append("connected role is not ltd_app")
           if superuser or can_create:
               problems.append("role can create schema objects")
-          if not ssl:
-              problems.append("connection is not encrypted (use sslmode=require)")
           if db_version != migrations.latest_version():
               problems.append(f"schema version {db_version}, this commit expects {migrations.latest_version()}")
           if problems:
               sys.exit("refusing to start the worker: " + "; ".join(problems))
-          print(f"preflight ok: role ltd_app, TLS, exact privilege policy, schema {db_version}")
+          print(f"preflight ok: role ltd_app, client TLS verified, exact privilege policy, schema {db_version}")
           PY
 
       - name: Run the worker for the requested time, then stop it gracefully

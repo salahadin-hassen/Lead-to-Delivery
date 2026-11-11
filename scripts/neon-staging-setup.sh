@@ -130,11 +130,15 @@ connect() {
   [ -n "$T_CB" ] && export PGCHANNELBINDING=$T_CB
   # Password-free URL for the Python tools; libpq reads the password from PGPASSFILE.
   export DATABASE_URL="postgresql://$T_USER@$T_HOST:$T_PORT/ltd?sslmode=require"
+  # TLS is verified on the CLIENT connection (libpq PQsslInUse via psycopg):
+  # Neon terminates TLS at its proxy, so the server-side pg_stat_ssl says
+  # false even for an encrypted connection. Fails closed when unencrypted or
+  # when the state cannot be established.
   local check
-  check=$(psql -XAtq -v ON_ERROR_STOP=1 -c "SELECT current_database() || ' ' || current_user || ' ' ||
-          (inet_server_addr() IS NOT NULL) || ' ' || (SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid())") \
-    || die "cannot connect (check the URL, region and password)"
-  [ "$check" = "ltd $T_USER true true" ] || die "server check failed: expected 'ltd $T_USER true true', got '$check'"
+  check=$("$PY" -m app.dbtls check) \
+    || die "cannot connect over a verified TLS connection (${check#refused: })"
+  [ "$check" = "ltd $T_USER true encrypted" ] \
+    || die "server check failed: expected 'ltd $T_USER true encrypted', got '$check'"
   echo "connected: database ltd as $T_USER over TLS"
 }
 

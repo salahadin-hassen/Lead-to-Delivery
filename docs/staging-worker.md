@@ -27,7 +27,10 @@ configures Neon and the GitHub environment below.
       API's real values are never given to the worker);
    3. **preflight**: connects with `STAGING_LTD_APP_DATABASE_URL` and refuses
       to continue unless the role is `ltd_app`, the role cannot create
-      objects in `public`, the connection is TLS-encrypted,
+      objects in `public`, the **client** connection is verifiably
+      TLS-encrypted (libpq's own state, checked before any query;
+      unencrypted or unverifiable → refused; the server-side `pg_stat_ssl`
+      is not used because Neon ends TLS at its proxy and reports `false`),
       [`deploy/db-app-check.sql`](../deploy/db-app-check.sql) passes (the
       exact privilege policy, the same check the setup helper and CI run;
       mounted read-only from the checkout), and the schema version equals
@@ -100,7 +103,7 @@ cancellation is recovered through its lease on the next run.
 
 ## Verifying a run
 
-The run log shows `preflight ok: role ltd_app, TLS, exact privilege policy, schema N`,
+The run log shows `preflight ok: role ltd_app, client TLS verified, exact privilege policy, schema N`,
 `worker started`, the worker's own log lines, `time limit reached: sending
 SIGTERM`, and `worker stopped cleanly`. In the admin console the processed
 jobs show new attempts. Secrets never appear (GitHub masks them; the
