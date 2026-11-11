@@ -33,7 +33,7 @@ project_id	client_name	company_name	project_name	template_name	project_status	pr
 
 - Python 3.12
 - PostgreSQL 16 (local)
-- Node.js 22+ (admin console)
+- Node.js 24 (`frontend/.nvmrc`: 24.22.2, the version CI and the production image use)
 
 ## Setup
 
@@ -59,7 +59,7 @@ nothing is dropped.
 cp .env.example .env                    # then review values
 cd backend
 python3 -m venv .venv
-.venv/bin/pip install -e '.[test]'
+.venv/bin/pip install --require-hashes --only-binary=:all: -r requirements-dev.lock   # see docs/build-and-release.md
 .venv/bin/python -m app.migrations      # apply migrations to ltd
 .venv/bin/uvicorn app.main:app --port 8010
 curl -i http://localhost:8010/api/health

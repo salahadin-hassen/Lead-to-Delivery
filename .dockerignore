@@ -1,0 +1,28 @@
+# Allowlist: the build context contains ONLY what the Dockerfile copies.
+# Everything else (.env, var/n8n, databases, dumps, logs, caches, virtualenvs,
+# node_modules, docs, deploy files, secret files a platform may drop into the
+# context root) is excluded by the first rule.
+*
+
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/index.html
+!frontend/tsconfig.json
+!frontend/tsconfig.node.json
+!frontend/vite.config.ts
+!frontend/src/
+
+!backend/requirements.lock
+!backend/app/
+!backend/sql/
+
+# Never, even inside allowed directories.
+**/__pycache__
+**/*.pyc
+**/.env
+**/.env.*
+**/*.log
+**/*.sqlite*
+**/*.dump
+**/node_modules
+**/dist

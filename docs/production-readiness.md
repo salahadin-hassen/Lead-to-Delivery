@@ -31,7 +31,7 @@ GoHighLevel/HubSpot integration.
 - [x] Secrets absent from Git (secret scan of every commit) and from logs (staging log scan)
 - [x] HTTPS-only config, host allowlist, no CORS, trusted-proxy guidance, security headers
 - [x] Fail-closed n8n relay configuration (Task 9.1)
-- [ ] External penetration test / dependency audit — **not done**
+- [ ] External penetration test — **not done** (dependency audit run 2026-11-11: no known vulnerabilities)
 
 ### Reliability
 - [x] Backend regression passes (see Evidence)
@@ -92,9 +92,14 @@ fail visibly with `*_NOT_CONFIGURED` and can be retried later.
    first administrator created with MFA.
 4. Platform backups (daily + point-in-time) and uptime monitoring/alerts on
    `/api/health` and `/api/health/worker`.
-5. Decide per integration: verify against real test targets (credentials and
+5. Deployment gates from [deployment-preflight.md](deployment-preflight.md)
+   §6 (P1): platform proxy range (`FORWARDED_ALLOW_IPS`), direct database
+   URL, migrations with separate owner credentials, restore drill, worker
+   stop timeout; and a first green CI run including the image build
+   ([build-and-release.md](build-and-release.md)).
+6. Decide per integration: verify against real test targets (credentials and
    test spreadsheet/List/channel needed) or launch with it disabled.
-6. Post-deploy verification against the deployed URL (deployment.md §6),
+7. Post-deploy verification against the deployed URL (deployment.md §6),
    recording the deployed commit SHA.
 
 ## Known limitations
