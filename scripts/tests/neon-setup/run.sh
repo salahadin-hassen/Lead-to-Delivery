@@ -25,7 +25,10 @@ PORT=${PORT:-55435}
 for tool in "$PG_BIN/initdb" "$PG_BIN/pg_ctl"; do [ -x "$tool" ] || { echo "missing $tool (set PG_BIN)" >&2; exit 2; }; done
 for tool in psql openssl python3; do command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 2; }; done
 [ -x "$REPO/backend/.venv/bin/python" ] || { echo "missing backend/.venv" >&2; exit 2; }
-if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then echo "port $PORT is in use; set PORT" >&2; exit 2; fi
+# PORT: cluster; +1: API under test; +2/+3: TLS-terminating / no-TLS proxies (Neon topology).
+for p in "$PORT" $((PORT + 1)) $((PORT + 2)) $((PORT + 3)); do
+  if (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then echo "port $p is in use; set PORT" >&2; exit 2; fi
+done
 
 T=$(mktemp -d "${TMPDIR:-/tmp}/ltd-neon-setup-test.XXXXXXXX")
 cleanup() {

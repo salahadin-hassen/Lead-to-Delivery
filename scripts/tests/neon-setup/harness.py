@@ -69,8 +69,72 @@ def owner(sub, script=COPY):
     return run(script, [sub], [(r"URL \(input hidden\)", url("neondb_owner", OWNER_PW)), (r"Type yes", "yes")])
 
 
-def app(sub, pw, extra=(), args=()):
-    return run(COPY, [sub, *args], [(r"URL \(input hidden\)", url("ltd_app", pw)), (r"Type yes", "yes"), *extra])
+def app(sub, pw, extra=(), args=(), url_port=None):
+    return run(COPY, [sub, *args], [(r"URL \(input hidden\)", url("ltd_app", pw, port=url_port)), (r"Type yes", "yes"),
+                                    *extra])
+
+
+def start_proxy(listen_port, terminate_tls):
+    """Neon-like front door on 127.0.0.1:listen_port -> the cluster on PORT over PLAIN TCP.
+    terminate_tls=True: accepts the client's SSLRequest and ends TLS here, so the server
+    sees an unencrypted connection (pg_stat_ssl = false) while the client's IS encrypted -
+    Neon's proxy topology. False: answers 'N' (no TLS), as a server without TLS would."""
+    import socket, ssl, threading
+    ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    ctx.load_cert_chain(f"{WORK}/data/server.crt", f"{WORK}/data/server.key")
+    srv = socket.create_server(("127.0.0.1", listen_port))
+
+    def pump(client, upstream):
+        """One thread per connection (an SSL socket must not be used from two threads)."""
+        import select as sel
+        try:
+            while True:
+                if isinstance(client, ssl.SSLSocket) and client.pending():
+                    ready = [client]
+                else:
+                    ready, _, _ = sel.select([client, upstream], [], [], 60)
+                    if not ready:
+                        return
+                for s in ready:
+                    data = s.recv(65536)
+                    if not data:
+                        return
+                    (upstream if s is client else client).sendall(data)
+        except OSError:
+            pass
+        finally:
+            for s in (client, upstream):
+                try: s.close()
+                except OSError: pass
+
+    def handle(client):
+        try:
+            first = b""
+            while True:
+                head = client.recv(8, socket.MSG_WAITALL)
+                code = int.from_bytes(head[4:8], "big") if len(head) == 8 else 0
+                if code == 80877104:                      # GSSENCRequest -> not supported
+                    client.sendall(b"N"); continue
+                if code == 80877103:                      # SSLRequest
+                    if terminate_tls:
+                        client.sendall(b"S")
+                        client = ctx.wrap_socket(client, server_side=True)
+                    else:
+                        client.sendall(b"N")
+                    break
+                first = head; break                       # plain startup packet
+            upstream = socket.create_connection(("127.0.0.1", PORT))
+            if first:
+                upstream.sendall(first)
+            pump(client, upstream)
+        except Exception:
+            client.close()
+
+    def accept():
+        while True:
+            c, _ = srv.accept()
+            threading.Thread(target=handle, args=(c,), daemon=True).start()
+    threading.Thread(target=accept, daemon=True).start()
 
 
 results = []
@@ -242,19 +306,50 @@ pre = textwrap.dedent(re.search(r"<<'PY'\n(.*?)\n\s*PY\n", wf, re.S).group(1))
 pre = pre.replace("/policy/db-app-check.sql", f"{REPO}/deploy/db-app-check.sql")
 passfile = f"{WORK}/app.pgpass"
 fd = os.open(passfile, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-os.write(fd, f"127.0.0.1:{PORT}:ltd:ltd_app:{APP_PW}\n".encode())
+os.write(fd, f"127.0.0.1:*:ltd:ltd_app:{APP_PW}\n".encode())
 os.close(fd)
 AENV = {**{k: v for k, v in ENV.items() if k != "PGHOSTADDR"}, "PGPASSFILE": passfile, "LTD_DISABLE_DOTENV": "1",
         "DATABASE_URL": f"postgresql://ltd_app@127.0.0.1:{PORT}/ltd?sslmode=require", "WORKER_POLL_SECONDS": "1"}
 
 
-def preflight():
-    p = subprocess.run([PY, "-c", pre], cwd=f"{REPO}/backend", env=AENV, capture_output=True, text=True, timeout=60)
+def preflight(database_url=None):
+    env = dict(AENV, DATABASE_URL=database_url) if database_url else AENV
+    p = subprocess.run([PY, "-c", pre], cwd=f"{REPO}/backend", env=env, capture_output=True, text=True, timeout=60)
     return p.returncode, p.stdout + p.stderr
 
 
 code, text = preflight()
-case("workflow preflight: passes on the narrowed role", code == 0 and "preflight ok: role ltd_app, TLS, exact privilege policy" in text)
+case("workflow preflight: passes on the narrowed role (server-side TLS)",
+     code == 0 and "preflight ok: role ltd_app, client TLS verified, exact privilege policy" in text)
+
+# ---------- 7b. Neon's topology: TLS ends at a proxy, the server sees plain TCP
+TLS_PROXY, PLAIN_PROXY = PORT + 2, PORT + 3
+start_proxy(TLS_PROXY, terminate_tls=True)
+start_proxy(PLAIN_PROXY, terminate_tls=False)
+sys.path.insert(0, f"{REPO}/backend")
+import psycopg  # noqa: E402  (backend venv)
+from app.dbtls import TlsState, client_tls_state  # noqa: E402
+with psycopg.connect(host="127.0.0.1", port=TLS_PROXY, dbname="ltd", user="neondb_owner", password=OWNER_PW,
+                     sslmode="require", connect_timeout=10) as c:
+    server_ssl = c.execute("SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()").fetchone()[0]
+    client_state = client_tls_state(c.pgconn)[0]
+case("proxy reproduces Neon: server pg_stat_ssl=false while the client connection is encrypted",
+     server_ssl is False and client_state is TlsState.ENCRYPTED)
+code, text = app("verify", APP_PW, url_port=TLS_PROXY)
+case("helper through the TLS-terminating proxy: client TLS verified, VERIFY PASSED (old server-side check refused this)",
+     code == 0 and "VERIFY PASSED" in text)
+code, text = run(COPY, ["roles"], [(r"URL \(input hidden\)", url("neondb_owner", OWNER_PW, port=PLAIN_PROXY)),
+                                   (r"Type yes", "yes")])
+case("helper when the server path offers no TLS: refused, nothing done",
+     code != 0 and "cannot connect over a verified TLS connection" in text and "narrowed" not in text)
+code, text = preflight(f"postgresql://ltd_app@127.0.0.1:{TLS_PROXY}/ltd?sslmode=require")
+case("workflow preflight through the TLS-terminating proxy: passes", code == 0 and "client TLS verified" in text, text.strip()[-160:])
+code, text = preflight(f"postgresql://ltd_app@127.0.0.1:{PLAIN_PROXY}/ltd?sslmode=prefer")
+case("workflow preflight on a real unencrypted connection (sslmode=prefer, no TLS offered): refused before any query",
+     code != 0 and "connection is unencrypted" in text and "preflight ok" not in text, text.strip()[-160:])
+code, text = preflight(f"postgresql://ltd_app@127.0.0.1:{PORT}/ltd?sslmode=disable")
+case("workflow preflight with sslmode=disable to a TLS-capable server: refused",
+     code != 0 and "connection is unencrypted" in text)
 
 # ---------- 8. drift: detected by verify, the workflow preflight and admin; repaired by roles
 su("GRANT TRUNCATE ON clients TO ltd_app; GRANT INSERT ON schema_migrations TO ltd_app")
@@ -279,7 +374,7 @@ case("rotation: old password rejected, new one verifies, privileges unchanged",
      code != 0 and "cannot connect" in text and code2 == 0 and acl_snapshot() == snap)
 os.remove(passfile)
 fd = os.open(passfile, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-os.write(fd, f"127.0.0.1:{PORT}:ltd:ltd_app:{APP_PW}\n".encode())
+os.write(fd, f"127.0.0.1:*:ltd:ltd_app:{APP_PW}\n".encode())
 os.close(fd)
 
 # ---------- 10. the application as ltd_app: API health, worker claim loop and heartbeats, admin bootstrap

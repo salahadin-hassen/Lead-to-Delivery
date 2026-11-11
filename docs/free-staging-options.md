@@ -229,11 +229,21 @@ resources just to look.
    **simulated** — not a Neon test): `scripts/tests/neon-setup/run.sh`
    (needs PostgreSQL 16+ server binaries, `psql`, `openssl`,
    `backend/.venv`; set `PG_BIN`/`PORT` if needed). It builds a throwaway
-   TLS cluster on its own port and socket, runs 37 cases (URL refusals,
+   TLS cluster on its own port and socket, runs 43 cases (URL refusals,
    refusal of `neon_superuser`/BYPASSRLS/REPLICATION roles with nothing
    changed, narrowing of a broad role, idempotence, drift detection by
    `verify`, the worker workflow's preflight and `admin`, rotation, API and
-   worker as `ltd_app`, no password in the statement log) and deletes it.
+   worker as `ltd_app`, no password in the statement log, and Neon's TLS
+   topology: a local proxy that ends TLS so the server reports
+   `pg_stat_ssl = false` while the client is encrypted, plus a path that
+   offers no TLS) and deletes it.
+
+   **TLS is verified on the client connection.** Neon's proxy terminates
+   TLS, so the server-side `pg_stat_ssl.ssl` is `false` for every Neon
+   connection (observed on project `ltd-staging`, 2026-11-11, with the
+   client on TLSv1.3). The helper and the worker preflight therefore check
+   libpq's own state through `python -m app.dbtls` / `app.dbtls`, and refuse
+   unencrypted or unverifiable connections.
 5. **Rotate the owner password** in Neon after setup (and after every later
    migration session) so the credential used on the operator machine does
    not stay valid; store the new one only in the password manager.
