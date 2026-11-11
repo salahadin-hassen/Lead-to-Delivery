@@ -53,7 +53,8 @@ docker run -d --name "$PG" --network "$NET" -e POSTGRES_HOST_AUTH_METHOD=trust "
 for _ in $(seq 1 60); do docker exec "$PG" pg_isready -U postgres -q && break; sleep 1; done
 docker exec "$PG" pg_isready -U postgres -q || fail "PostgreSQL did not start"
 docker exec "$PG" psql -U postgres -XAtqv ON_ERROR_STOP=1 \
-  -c "CREATE ROLE ltd_owner LOGIN" -c "CREATE ROLE ltd_app LOGIN" -c "CREATE DATABASE ltd_smoke OWNER ltd_owner"
+  -c "CREATE ROLE ltd_owner LOGIN" -c "CREATE ROLE ltd_app LOGIN CONNECTION LIMIT 20" \
+  -c "CREATE DATABASE ltd_smoke OWNER ltd_owner"
 docker exec "$PG" psql -U postgres -d ltd_smoke -XAtqv ON_ERROR_STOP=1 \
   -c "REVOKE ALL ON DATABASE ltd_smoke FROM PUBLIC" \
   -c "GRANT CONNECT ON DATABASE ltd_smoke TO ltd_owner, ltd_app" \
@@ -101,11 +102,13 @@ docker run --rm --network "$NET" -e "DATABASE_URL=$OWNER_URL" "$IMAGE" python -m
 docker run --rm --network "$NET" -e "DATABASE_URL=$OWNER_URL" "$IMAGE" python -m app.migrations --status
 [ "$(psql_as ltd_owner 'select max(version) from schema_migrations')" = "6" ] || fail "schema is not at version 6"
 
-step "least-privilege app role (deploy/db-roles.sql grants)"
-psql_as ltd_owner "GRANT USAGE ON SCHEMA public TO ltd_app;
-  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ltd_app;
-  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ltd_app;"
+step "least-privilege app role (deploy/db-app-grants.sql verbatim, proven by deploy/db-app-check.sql)"
+cat deploy/db-app-grants.sql deploy/db-app-check.sql \
+  | docker exec -i "$PG" psql -U ltd_owner -d ltd_smoke -XAtqv ON_ERROR_STOP=1 -1 -f - || fail "ltd_app policy"
+docker exec -i "$PG" psql -U ltd_app -d ltd_smoke -XAtqv ON_ERROR_STOP=1 -f - < deploy/db-app-check.sql \
+  || fail "ltd_app policy check as ltd_app"
 if psql_as ltd_app "create table ddl_probe (i int)" 2>/dev/null; then fail "ltd_app can create tables"; fi
+if psql_as ltd_app "update project_templates set name = name" 2>/dev/null; then fail "ltd_app can write project_templates"; fi
 
 step "API healthy; frontend, assets and security headers; host and docs rules"
 for _ in $(seq 1 30); do [ "$(code "$BASE/api/health")" = "200" ] && break; sleep 1; done

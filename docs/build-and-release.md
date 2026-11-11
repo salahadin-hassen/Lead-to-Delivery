@@ -93,7 +93,8 @@ The image smoke test (`.github/ci/image-smoke.sh <image>`):
 
 1. Creates a private Docker network and a throwaway PostgreSQL 16 container,
    then an isolated database `ltd_smoke` owned by `ltd_owner`, plus a
-   restricted `ltd_app` role (the [deploy/db-roles.sql](../deploy/db-roles.sql) model).
+   restricted `ltd_app` role with exactly [deploy/db-app-grants.sql](../deploy/db-app-grants.sql),
+   proven by [deploy/db-app-check.sql](../deploy/db-app-check.sql) (as the owner and as `ltd_app`).
 2. Checks the image: UID 10001, no Node/npm, built frontend and all six
    migrations present, no frontend sources, tests, docs, n8n, `.env`,
    key/dump/database files, test packages or secret-bearing variables.
